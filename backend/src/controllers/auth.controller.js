@@ -46,6 +46,24 @@ const registerCustomerController = asyncHandler(async (req, res) => {
   });
 });
 
+const demoAccountsController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'GetDemoAccounts',
+    intent: 'Provide quick-fill login accounts for the requested public auth role',
+  });
+
+  // WHY: Keep the role lookup and response shaping in the service so the controller only owns the public HTTP contract.
+  const result = await authService.getDemoAccounts(req.params.role, logContext);
+
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const loginController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -133,6 +151,7 @@ const meController = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  demoAccountsController,
   loginController,
   logoutController,
   meController,

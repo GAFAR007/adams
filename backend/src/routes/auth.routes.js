@@ -7,6 +7,7 @@
 const express = require("express");
 
 const {
+  demoAccountsController,
   loginController,
   logoutController,
   meController,
@@ -24,6 +25,7 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   customerRegisterValidator,
+  demoAccountsValidator,
   loginValidator,
 } = require("../validators/auth.validators");
 
@@ -38,6 +40,12 @@ function createAuthRouter() {
     customerRegisterValidator,
     validateRequest,
     registerCustomerController,
+  );
+  router.get(
+    "/demo-accounts/:role",
+    demoAccountsValidator,
+    validateRequest,
+    demoAccountsController,
   );
   router.post(
     "/login",

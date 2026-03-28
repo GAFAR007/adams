@@ -1,93 +1,35 @@
-/// WHAT: Renders the customer login form and starts the authenticated customer session.
-/// WHY: Customers need a direct path into their request area before creating or tracking requests.
-/// HOW: Collect credentials, call the auth controller, and route successful logins into `/app/requests`.
+/// WHAT: Renders the customer login using the shared role-aware login experience.
+/// WHY: Customers should get the same polished login structure while still routing into their request inbox only.
+/// HOW: Configure the shared role login screen with customer-specific copy, routing, and the register action.
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../application/auth_controller.dart';
-import '../../../shared/presentation/auth_scaffold.dart';
+import 'role_login_screen.dart';
 
-class CustomerLoginScreen extends ConsumerStatefulWidget {
+class CustomerLoginScreen extends StatelessWidget {
   const CustomerLoginScreen({super.key});
 
   @override
-  ConsumerState<CustomerLoginScreen> createState() => _CustomerLoginScreenState();
-}
-
-class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    debugPrint('CustomerLoginScreen._submit: customer login submitted');
-
-    try {
-      await ref.read(authControllerProvider.notifier).loginAsRole(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-            expectedRole: 'customer',
-            failureMessage: 'Use the customer login for customer accounts only.',
-          );
-    } catch (_) {
-      return;
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    context.go('/app/requests');
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authControllerProvider);
-
-    return AuthScaffold(
-      title: 'Customer Login',
-      subtitle: 'Sign in to submit and track your service requests.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          TextField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: 'Email'),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Password'),
-          ),
-          if (authState.errorMessage != null) ...<Widget>[
-            const SizedBox(height: 16),
-            Text(authState.errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ],
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: authState.isSubmitting ? null : _submit,
-              child: Text(authState.isSubmitting ? 'Signing in...' : 'Login'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: () => context.go('/register'),
-            child: const Text('Need an account? Register here'),
-          ),
-        ],
+    return RoleLoginScreen(
+      role: 'customer',
+      pageTitle: 'Customer Login',
+      headerTitle: 'Sign in to your service space',
+      headerSubtitle:
+          'Track your requests, see who picked up your queue, and continue the conversation in one place.',
+      emailLabel: 'Email',
+      submitLabel: 'Enter Request Inbox',
+      failureMessage: 'Use the customer login for customer accounts only.',
+      successRoute: '/app/requests',
+      icon: Icons.home_work_rounded,
+      footer: Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+          onPressed: () => context.go('/register'),
+          child: const Text('Need an account? Register here'),
+        ),
       ),
     );
   }

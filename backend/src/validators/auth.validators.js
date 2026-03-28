@@ -4,7 +4,9 @@
  * HOW: Use `express-validator` chains that match the backend auth contract exactly.
  */
 
-const { body } = require('express-validator');
+const { body, param } = require('express-validator');
+
+const { USER_ROLES } = require('../constants/app.constants');
 
 const customerRegisterValidator = [
   body('firstName').trim().notEmpty().withMessage('First name is required'),
@@ -21,7 +23,14 @@ const loginValidator = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
 
+const demoAccountsValidator = [
+  param('role')
+    .isIn(Object.values(USER_ROLES))
+    .withMessage('A valid auth role is required'),
+];
+
 module.exports = {
   customerRegisterValidator,
+  demoAccountsValidator,
   loginValidator,
 };

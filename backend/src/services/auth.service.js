@@ -31,6 +31,62 @@ const {
   rotateRefreshSession,
 } = require("./token.service");
 
+function resolveDemoPassword(
+  role,
+  email,
+) {
+  const normalizedEmail =
+    String(email || "").toLowerCase();
+
+  // WHY: Demo autofill passwords are a local/dev convenience and must not survive into production responses.
+  if (
+    process.env.NODE_ENV ===
+    "production"
+  ) {
+    return null;
+  }
+
+  if (
+    role === USER_ROLES.ADMIN &&
+    normalizedEmail ===
+      "admin@adams.local"
+  ) {
+    return (
+      process.env
+        .SEED_ADMIN_PASSWORD ||
+      null
+    );
+  }
+
+  if (
+    role === USER_ROLES.STAFF &&
+    /^staff\d+@adams\.local$/.test(
+      normalizedEmail,
+    )
+  ) {
+    return (
+      process.env
+        .SEED_STAFF_PASSWORD ||
+      null
+    );
+  }
+
+  if (
+    role === USER_ROLES.CUSTOMER &&
+    /^customer\d+@adams\.local$/.test(
+      normalizedEmail,
+    )
+  ) {
+    return (
+      process.env
+        .SEED_CUSTOMER_PASSWORD ||
+      null
+    );
+  }
+
+  return null;
+}
+
 async function registerCustomer(
   payload,
   meta,
@@ -420,7 +476,82 @@ async function getCurrentUser(
   };
 }
 
+async function getDemoAccounts(
+  role,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: "service",
+    operation: "GetDemoAccounts",
+    intent:
+      "Return backend-backed quick-fill login accounts for the requested role",
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: "service",
+    operation: "GetDemoAccounts",
+    intent:
+      "Load active users for the requested auth role before shaping quick-fill accounts",
+  });
+
+  const users = await User.find({
+    role,
+    status: USER_STATUSES.ACTIVE,
+  }).sort({
+    createdAt: 1,
+    firstName: 1,
+    lastName: 1,
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: "service",
+    operation: "GetDemoAccounts",
+    intent:
+      "Confirm the role-specific users are ready for quick-fill response shaping",
+  });
+
+  // WHY: Only expose accounts that have a known safe quick-fill password in this environment so the UI never advertises unusable shortcuts.
+  const accounts = users
+    .map((user) => {
+      const quickFillPassword =
+        resolveDemoPassword(
+          role,
+          user.email,
+        );
+
+      if (!quickFillPassword) {
+        return null;
+      }
+
+      return {
+        id: String(user._id),
+        fullName:
+          `${user.firstName} ${user.lastName}`.trim(),
+        email: user.email,
+        quickFillPassword,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    message:
+      "Demo accounts fetched successfully",
+    role,
+    passwordAutofillEnabled:
+      process.env.NODE_ENV !==
+      "production",
+    accounts,
+  };
+}
+
 module.exports = {
+  getDemoAccounts,
   getCurrentUser,
   loginUser,
   logoutUser,
