@@ -6,12 +6,7 @@ library;
 import 'package:flutter/material.dart';
 
 class PanelCard extends StatelessWidget {
-  const PanelCard({
-    super.key,
-    required this.child,
-    this.title,
-    this.subtitle,
-  });
+  const PanelCard({super.key, required this.child, this.title, this.subtitle});
 
   final Widget child;
   final String? title;
@@ -20,10 +15,13 @@ class PanelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isCompact = MediaQuery.sizeOf(context).width < 600;
+    final cardPadding = isCompact ? 18.0 : 24.0;
+    final sectionSpacing = isCompact ? 16.0 : 20.0;
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(cardPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -33,7 +31,7 @@ class PanelCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(subtitle!, style: theme.textTheme.bodyMedium),
               ],
-              const SizedBox(height: 20),
+              SizedBox(height: sectionSpacing),
             ],
             child,
           ],

@@ -114,14 +114,12 @@ class AdminDashboardBundle {
   const AdminDashboardBundle({
     required this.kpis,
     required this.recentRequests,
-    required this.requests,
     required this.staff,
     required this.invites,
   });
 
   final AdminKpis kpis;
   final List<ServiceRequestModel> recentRequests;
-  final List<ServiceRequestModel> requests;
   final List<StaffMemberSummary> staff;
   final List<StaffInviteModel> invites;
 }
@@ -133,6 +131,7 @@ class StaffDashboardBundle {
     required this.assignedCount,
     required this.quotedCount,
     required this.confirmedCount,
+    required this.pendingStartCount,
     required this.clearedTodayCount,
     required this.queueRequests,
     required this.assignedRequests,
@@ -143,6 +142,7 @@ class StaffDashboardBundle {
   final int assignedCount;
   final int quotedCount;
   final int confirmedCount;
+  final int pendingStartCount;
   final int clearedTodayCount;
   final List<ServiceRequestModel> queueRequests;
   final List<ServiceRequestModel> assignedRequests;
@@ -154,6 +154,18 @@ class StaffDashboardBundle {
         json['queueRequests'] as List<dynamic>? ?? const <dynamic>[];
     final assignedRequests =
         json['assignedRequests'] as List<dynamic>? ?? const <dynamic>[];
+    final parsedQueueRequests =
+        queueRequests
+            .whereType<Map<String, dynamic>>()
+            .map(ServiceRequestModel.fromJson)
+            .toList()
+          ..sort(compareServiceRequestsByLatestActivity);
+    final parsedAssignedRequests =
+        assignedRequests
+            .whereType<Map<String, dynamic>>()
+            .map(ServiceRequestModel.fromJson)
+            .toList()
+          ..sort(compareServiceRequestsByLatestActivity);
 
     return StaffDashboardBundle(
       currentAvailability: json['currentAvailability'] as String? ?? 'offline',
@@ -161,15 +173,10 @@ class StaffDashboardBundle {
       assignedCount: kpis['assignedCount'] as int? ?? 0,
       quotedCount: kpis['quotedCount'] as int? ?? 0,
       confirmedCount: kpis['confirmedCount'] as int? ?? 0,
+      pendingStartCount: kpis['pendingStartCount'] as int? ?? 0,
       clearedTodayCount: kpis['clearedTodayCount'] as int? ?? 0,
-      queueRequests: queueRequests
-          .whereType<Map<String, dynamic>>()
-          .map(ServiceRequestModel.fromJson)
-          .toList(),
-      assignedRequests: assignedRequests
-          .whereType<Map<String, dynamic>>()
-          .map(ServiceRequestModel.fromJson)
-          .toList(),
+      queueRequests: parsedQueueRequests,
+      assignedRequests: parsedAssignedRequests,
     );
   }
 }

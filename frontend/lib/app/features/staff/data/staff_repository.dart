@@ -53,7 +53,9 @@ class StaffRepository {
     );
   }
 
-  Future<ServiceRequestModel> attendQueueRequest({required String requestId}) async {
+  Future<ServiceRequestModel> attendQueueRequest({
+    required String requestId,
+  }) async {
     final response = await _client.postJson('/staff/queue/$requestId/attend');
 
     // WHY: Return the updated request row so callers can inspect the claimed queue item if they need immediate feedback.
@@ -75,10 +77,42 @@ class StaffRepository {
   Future<void> sendMessage({
     required String requestId,
     required String message,
+    String? actionType,
   }) async {
     await _client.postJson(
       '/staff/requests/$requestId/messages',
-      data: <String, dynamic>{'message': message},
+      data: <String, dynamic>{'message': message, 'actionType': actionType},
+    );
+  }
+
+  Future<void> sendInvoice({
+    required String requestId,
+    required double amount,
+    required String dueDate,
+    required String paymentMethod,
+    required String paymentInstructions,
+    String? note,
+  }) async {
+    await _client.postJson(
+      '/staff/requests/$requestId/invoice',
+      data: <String, dynamic>{
+        'amount': amount,
+        'dueDate': dueDate,
+        'paymentMethod': paymentMethod,
+        'paymentInstructions': paymentInstructions,
+        'note': note,
+      },
+    );
+  }
+
+  Future<void> reviewPaymentProof({
+    required String requestId,
+    required String decision,
+    String? reviewNote,
+  }) async {
+    await _client.patchJson(
+      '/staff/requests/$requestId/invoice/proof/review',
+      data: <String, dynamic>{'decision': decision, 'reviewNote': reviewNote},
     );
   }
 }

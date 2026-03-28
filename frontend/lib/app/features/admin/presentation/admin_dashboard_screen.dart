@@ -1,6 +1,6 @@
-/// WHAT: Renders the admin dashboard with KPIs, request assignment, staff list, and invite generation.
-/// WHY: Admins need one operational surface to manage the request pipeline and staff access.
-/// HOW: Fetch the compact dashboard bundle, render responsive panels, and invalidate it after actions.
+/// WHAT: Renders the admin workspace with separate overview, queue, staff, and invite sections.
+/// WHY: Admin operations grow quickly, so one long stacked dashboard becomes noisy and hard to use as customer volume rises.
+/// HOW: Load the summary bundle once, fetch the request queue with backend filters, and switch sections through a chat-style bottom navigation bar.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,18 +8,69 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../shared/presentation/panel_card.dart';
-import '../../../shared/presentation/status_chip.dart';
-import '../../auth/application/auth_controller.dart';
-import '../data/admin_repository.dart';
 import '../../../core/models/dashboard_models.dart';
+import '../../../core/models/service_request_model.dart';
+import '../../../shared/data/internal_chat_repository.dart';
+import '../../../shared/presentation/invoice_draft_dialog.dart';
+import '../../../shared/presentation/workspace_bottom_nav.dart';
+import '../../../shared/utils/external_url_opener.dart';
+import '../../auth/application/auth_controller.dart';
+import '../../staff/presentation/staff_internal_chat_screen.dart';
+import '../data/admin_repository.dart';
+import 'admin_dashboard_sections.dart';
 
 final adminDashboardProvider = FutureProvider<AdminDashboardBundle>((
   Ref ref,
 ) async {
-  debugPrint('adminDashboardProvider: fetching admin dashboard bundle');
+  debugPrint('adminDashboardProvider: fetching admin dashboard summary');
   return ref.watch(adminRepositoryProvider).fetchDashboardBundle();
 });
+
+final adminRequestsProvider = FutureProvider.autoDispose
+    .family<List<ServiceRequestModel>, _AdminRequestQuery>((
+      Ref ref,
+      _AdminRequestQuery query,
+    ) async {
+      debugPrint(
+        'adminRequestsProvider: fetching requests with status=${query.status} search=${query.search}',
+      );
+      return ref
+          .watch(adminRepositoryProvider)
+          .fetchRequests(status: query.status, search: query.search);
+    });
+
+enum _AdminTab { overview, queue, staff, invites, chats }
+
+enum _AdminRequestFilter {
+  all,
+  waiting,
+  assigned,
+  underReview,
+  quoted,
+  confirmed,
+  closed,
+}
+
+class _AdminRequestQuery {
+  const _AdminRequestQuery({required this.status, required this.search});
+
+  final String? status;
+  final String? search;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+
+    return other is _AdminRequestQuery &&
+        other.status == status &&
+        other.search == search;
+  }
+
+  @override
+  int get hashCode => Object.hash(status, search);
+}
 
 class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -34,8 +85,16 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   final _inviteLastNameController = TextEditingController();
   final _inviteEmailController = TextEditingController();
   final _invitePhoneController = TextEditingController();
+  final _requestSearchController = TextEditingController();
   final Map<String, String?> _selectedAssignments = <String, String?>{};
+  final Set<String> _assigningRequestIds = <String>{};
   final Set<String> _inviteIdsBeingDeleted = <String>{};
+  final Set<String> _sendingInvoiceRequestIds = <String>{};
+  final Set<String> _reviewingPaymentProofRequestIds = <String>{};
+  _AdminTab _selectedTab = _AdminTab.overview;
+  _AdminRequestFilter _selectedRequestFilter = _AdminRequestFilter.all;
+  String _appliedSearchQuery = '';
+  String? _selectedRequestId;
   bool _isInviteSubmitting = false;
 
   @override
@@ -44,6 +103,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     _inviteLastNameController.dispose();
     _inviteEmailController.dispose();
     _invitePhoneController.dispose();
+    _requestSearchController.dispose();
     super.dispose();
   }
 
@@ -94,8 +154,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     required String requestId,
     required String staffId,
   }) async {
+    setState(() => _assigningRequestIds.add(requestId));
     debugPrint(
-      'AdminDashboardScreen._assignRequest: assigning request $requestId',
+      'AdminDashboardScreen._assignRequest: assigning request $requestId to $staffId',
     );
 
     try {
@@ -103,6 +164,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           .read(adminRepositoryProvider)
           .assignRequest(requestId: requestId, staffId: staffId);
       ref.invalidate(adminDashboardProvider);
+      ref.invalidate(
+        adminRequestsProvider(
+          _AdminRequestQuery(
+            status: _statusForFilter(_selectedRequestFilter),
+            search: _appliedSearchQuery.isEmpty ? null : _appliedSearchQuery,
+          ),
+        ),
+      );
 
       if (!mounted) {
         return;
@@ -121,6 +190,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           content: Text(error.toString().replaceFirst('Exception: ', '')),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _assigningRequestIds.remove(requestId));
+      }
     }
   }
 
@@ -184,15 +257,664 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     }
   }
 
+  Future<void> _sendInvoice(ServiceRequestModel request) async {
+    final draft = await showInvoiceDraftDialog(
+      context,
+      initialInvoice: request.invoice,
+    );
+    if (draft == null) {
+      return;
+    }
+
+    setState(() => _sendingInvoiceRequestIds.add(request.id));
+
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .sendInvoice(
+            requestId: request.id,
+            amount: draft.amount,
+            dueDate: draft.dueDate,
+            paymentMethod: draft.paymentMethod,
+            paymentInstructions: draft.paymentInstructions,
+            note: draft.note,
+          );
+      ref.invalidate(adminDashboardProvider);
+      ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invoice sent to customer')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sendingInvoiceRequestIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _reviewPaymentProof(
+    ServiceRequestModel request, {
+    required String decision,
+  }) async {
+    String? reviewNote;
+    if (decision == 'rejected') {
+      final noteController = TextEditingController();
+      reviewNote = await showDialog<String>(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: const Text('Reject payment proof'),
+            content: TextField(
+              controller: noteController,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                hintText: 'Tell the customer what needs to be corrected',
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(noteController.text.trim()),
+                child: const Text('Reject proof'),
+              ),
+            ],
+          );
+        },
+      );
+      noteController.dispose();
+      if (reviewNote == null) {
+        return;
+      }
+    }
+
+    setState(() => _reviewingPaymentProofRequestIds.add(request.id));
+
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .reviewPaymentProof(
+            requestId: request.id,
+            decision: decision,
+            reviewNote: reviewNote,
+          );
+      ref.invalidate(adminDashboardProvider);
+      ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            decision == 'approved'
+                ? 'Payment proof approved'
+                : 'Payment proof rejected',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _reviewingPaymentProofRequestIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _openPaymentProof(ServiceRequestModel request) async {
+    final fileUrl = request.invoice?.proof?.fileUrl;
+    if (fileUrl == null || fileUrl.isEmpty) {
+      return;
+    }
+
+    final opened = await openExternalUrl(fileUrl);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Opening proof is not supported here')),
+      );
+    }
+  }
+
+  Future<void> _copyInviteLink(String inviteLink) async {
+    // WHY: Copying the invite link is a pure admin convenience action, so keep the clipboard logic in one reusable helper.
+    await Clipboard.setData(ClipboardData(text: inviteLink));
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Invite link copied')));
+  }
+
+  void _applyQueueSearch() {
+    // WHY: Apply search explicitly so admins can type naturally without refetching the queue on every single keypress.
+    setState(() {
+      _appliedSearchQuery = _requestSearchController.text.trim();
+      _selectedRequestId = null;
+    });
+  }
+
+  void _clearQueueSearch() {
+    setState(() {
+      _requestSearchController.clear();
+      _appliedSearchQuery = '';
+      _selectedRequestId = null;
+    });
+  }
+
+  void _selectQueueFilter(_AdminRequestFilter filter) {
+    // WHY: Reset the selected thread when the queue slice changes so stale request ids do not linger after a refetch.
+    setState(() {
+      _selectedRequestFilter = filter;
+      _selectedRequestId = null;
+    });
+  }
+
+  ServiceRequestModel? _resolveSelectedRequest(
+    List<ServiceRequestModel> requests,
+  ) {
+    if (requests.isEmpty) {
+      return null;
+    }
+
+    for (final request in requests) {
+      if (request.id == _selectedRequestId) {
+        return request;
+      }
+    }
+
+    return requests.first;
+  }
+
+  _AdminRequestFilter _filterForRequest(ServiceRequestModel request) {
+    return switch (request.status) {
+      'submitted' => _AdminRequestFilter.waiting,
+      'assigned' => _AdminRequestFilter.assigned,
+      'under_review' => _AdminRequestFilter.underReview,
+      'quoted' => _AdminRequestFilter.quoted,
+      'appointment_confirmed' => _AdminRequestFilter.confirmed,
+      'closed' => _AdminRequestFilter.closed,
+      _ => _AdminRequestFilter.all,
+    };
+  }
+
+  void _openRequestFromOverview(ServiceRequestModel request) {
+    setState(() {
+      _selectedTab = _AdminTab.queue;
+      _selectedRequestFilter = _filterForRequest(request);
+      _selectedRequestId = request.id;
+      _appliedSearchQuery = '';
+      _requestSearchController.clear();
+    });
+  }
+
+  void _openQueueOverview() {
+    setState(() {
+      _selectedTab = _AdminTab.queue;
+      _selectedRequestFilter = _AdminRequestFilter.all;
+      _selectedRequestId = null;
+      _appliedSearchQuery = '';
+      _requestSearchController.clear();
+    });
+  }
+
+  String? _statusForFilter(_AdminRequestFilter filter) {
+    return switch (filter) {
+      _AdminRequestFilter.all => null,
+      _AdminRequestFilter.waiting => 'submitted',
+      _AdminRequestFilter.assigned => 'assigned',
+      _AdminRequestFilter.underReview => 'under_review',
+      _AdminRequestFilter.quoted => 'quoted',
+      _AdminRequestFilter.confirmed => 'appointment_confirmed',
+      _AdminRequestFilter.closed => 'closed',
+    };
+  }
+
+  int _filterCount(AdminKpis kpis, _AdminRequestFilter filter) {
+    return switch (filter) {
+      _AdminRequestFilter.all => kpis.totalRequests,
+      _AdminRequestFilter.waiting => kpis.waitingQueueCount,
+      _AdminRequestFilter.assigned => kpis.countsByStatus['assigned'] ?? 0,
+      _AdminRequestFilter.underReview =>
+        kpis.countsByStatus['under_review'] ?? 0,
+      _AdminRequestFilter.quoted => kpis.countsByStatus['quoted'] ?? 0,
+      _AdminRequestFilter.confirmed =>
+        kpis.countsByStatus['appointment_confirmed'] ?? 0,
+      _AdminRequestFilter.closed => kpis.countsByStatus['closed'] ?? 0,
+    };
+  }
+
+  String _filterLabel(_AdminRequestFilter filter) {
+    return switch (filter) {
+      _AdminRequestFilter.all => 'All',
+      _AdminRequestFilter.waiting => 'Waiting',
+      _AdminRequestFilter.assigned => 'Assigned',
+      _AdminRequestFilter.underReview => 'Review',
+      _AdminRequestFilter.quoted => 'Quoted',
+      _AdminRequestFilter.confirmed => 'Confirmed',
+      _AdminRequestFilter.closed => 'Closed',
+    };
+  }
+
+  List<AdminRequestFilterChipData> _buildFilterChips(
+    AdminDashboardBundle bundle,
+  ) {
+    return _AdminRequestFilter.values.map((filter) {
+      return AdminRequestFilterChipData(
+        label: _filterLabel(filter),
+        count: _filterCount(bundle.kpis, filter),
+        isSelected: _selectedRequestFilter == filter,
+        onTap: () => _selectQueueFilter(filter),
+      );
+    }).toList();
+  }
+
+  List<WorkspaceBottomNavItem> _buildNavItems(
+    AdminDashboardBundle bundle, {
+    required int internalChatUnreadCount,
+  }) {
+    return <WorkspaceBottomNavItem>[
+      const WorkspaceBottomNavItem(
+        label: 'Overview',
+        icon: Icons.dashboard_customize_rounded,
+      ),
+      WorkspaceBottomNavItem(
+        label: 'Queue',
+        icon: Icons.forum_rounded,
+        badgeText:
+            '${bundle.kpis.waitingQueueCount + bundle.kpis.activeQueueCount}',
+      ),
+      WorkspaceBottomNavItem(
+        label: 'Staff',
+        icon: Icons.groups_rounded,
+        badgeText: '${bundle.kpis.staffOnlineCount}',
+      ),
+      WorkspaceBottomNavItem(
+        label: 'Invites',
+        icon: Icons.person_add_alt_1_rounded,
+        badgeText: '${bundle.kpis.pendingInvitesCount}',
+      ),
+      WorkspaceBottomNavItem(
+        label: 'Chats',
+        icon: Icons.forum_rounded,
+        badgeText: '$internalChatUnreadCount',
+        badgeBackgroundColor: const Color(0xFFE04F5F),
+        badgeForegroundColor: Colors.white,
+      ),
+    ];
+  }
+
+  _AdminRequestQuery _currentRequestQuery() {
+    return _AdminRequestQuery(
+      status: _statusForFilter(_selectedRequestFilter),
+      search: _appliedSearchQuery.isEmpty ? null : _appliedSearchQuery,
+    );
+  }
+
+  Widget _buildQueueTab(
+    BuildContext context,
+    AdminDashboardBundle bundle,
+    AsyncValue<List<ServiceRequestModel>> requestsAsync,
+  ) {
+    return requestsAsync.when(
+      data: (List<ServiceRequestModel> requests) {
+        final selectedRequest = _resolveSelectedRequest(requests);
+        final validStaffIds = bundle.staff.map((staff) => staff.id).toSet();
+        final selectedAssignmentId = selectedRequest == null
+            ? null
+            : (() {
+                final current =
+                    _selectedAssignments[selectedRequest.id] ??
+                    selectedRequest.assignedStaff?.id;
+                return validStaffIds.contains(current) ? current : null;
+              })();
+        final isAssigning =
+            selectedRequest != null &&
+            _assigningRequestIds.contains(selectedRequest.id);
+
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final isDesktop = constraints.maxWidth >= 1180;
+            final showDetailOnly = !isDesktop && selectedRequest != null;
+
+            if (isDesktop) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  SizedBox(
+                    width: 360,
+                    child: AdminQueueSidebar(
+                      searchController: _requestSearchController,
+                      onApplySearch: _applyQueueSearch,
+                      onClearSearch: _clearQueueSearch,
+                      filterChips: _buildFilterChips(bundle),
+                      requests: requests,
+                      selectedRequestId: selectedRequest?.id,
+                      onSelectRequest: (request) {
+                        setState(() => _selectedRequestId = request.id);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: AdminRequestDetailPane(
+                      request: selectedRequest,
+                      staff: bundle.staff,
+                      onAssignToStaff: selectedRequest == null
+                          ? null
+                          : (String staffId) => _assignRequest(
+                              requestId: selectedRequest.id,
+                              staffId: staffId,
+                            ),
+                      selectedAssignmentId: selectedAssignmentId,
+                      onAssignmentChanged: (String? value) {
+                        if (selectedRequest == null) {
+                          return;
+                        }
+
+                        setState(
+                          () =>
+                              _selectedAssignments[selectedRequest.id] = value,
+                        );
+                      },
+                      onAssign:
+                          selectedRequest == null ||
+                              selectedAssignmentId == null
+                          ? null
+                          : () => _assignRequest(
+                              requestId: selectedRequest.id,
+                              staffId: selectedAssignmentId,
+                            ),
+                      isAssigning: isAssigning,
+                      onSendInvoice:
+                          selectedRequest == null ||
+                              selectedRequest.status == 'closed'
+                          ? null
+                          : () => _sendInvoice(selectedRequest),
+                      onOpenPaymentProof:
+                          selectedRequest?.invoice?.proof?.fileUrl == null
+                          ? null
+                          : () => _openPaymentProof(selectedRequest!),
+                      onApprovePaymentProof:
+                          selectedRequest?.invoice?.isProofSubmitted == true
+                          ? () => _reviewPaymentProof(
+                              selectedRequest!,
+                              decision: 'approved',
+                            )
+                          : null,
+                      onRejectPaymentProof:
+                          selectedRequest?.invoice?.isProofSubmitted == true
+                          ? () => _reviewPaymentProof(
+                              selectedRequest!,
+                              decision: 'rejected',
+                            )
+                          : null,
+                      isSendingInvoice:
+                          selectedRequest != null &&
+                          _sendingInvoiceRequestIds.contains(
+                            selectedRequest.id,
+                          ),
+                      isReviewingPaymentProof:
+                          selectedRequest != null &&
+                          _reviewingPaymentProofRequestIds.contains(
+                            selectedRequest.id,
+                          ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            if (showDetailOnly) {
+              return AdminRequestDetailPane(
+                request: selectedRequest,
+                staff: bundle.staff,
+                edgeToEdge: true,
+                onAssignToStaff: (String staffId) => _assignRequest(
+                  requestId: selectedRequest.id,
+                  staffId: staffId,
+                ),
+                selectedAssignmentId: selectedAssignmentId,
+                onAssignmentChanged: (String? value) {
+                  setState(
+                    () => _selectedAssignments[selectedRequest.id] = value,
+                  );
+                },
+                onAssign: selectedAssignmentId == null
+                    ? null
+                    : () => _assignRequest(
+                        requestId: selectedRequest.id,
+                        staffId: selectedAssignmentId,
+                      ),
+                isAssigning: isAssigning,
+                onSendInvoice: selectedRequest.status == 'closed'
+                    ? null
+                    : () => _sendInvoice(selectedRequest),
+                onOpenPaymentProof:
+                    selectedRequest.invoice?.proof?.fileUrl == null
+                    ? null
+                    : () => _openPaymentProof(selectedRequest),
+                onApprovePaymentProof:
+                    selectedRequest.invoice?.isProofSubmitted == true
+                    ? () => _reviewPaymentProof(
+                        selectedRequest,
+                        decision: 'approved',
+                      )
+                    : null,
+                onRejectPaymentProof:
+                    selectedRequest.invoice?.isProofSubmitted == true
+                    ? () => _reviewPaymentProof(
+                        selectedRequest,
+                        decision: 'rejected',
+                      )
+                    : null,
+                isSendingInvoice: _sendingInvoiceRequestIds.contains(
+                  selectedRequest.id,
+                ),
+                isReviewingPaymentProof: _reviewingPaymentProofRequestIds
+                    .contains(selectedRequest.id),
+                onBack: () => setState(() => _selectedRequestId = null),
+              );
+            }
+
+            return AdminQueueSidebar(
+              searchController: _requestSearchController,
+              onApplySearch: _applyQueueSearch,
+              onClearSearch: _clearQueueSearch,
+              filterChips: _buildFilterChips(bundle),
+              edgeToEdge: true,
+              requests: requests,
+              selectedRequestId: selectedRequest?.id,
+              onSelectRequest: (request) {
+                setState(() => _selectedRequestId = request.id);
+              },
+            );
+          },
+        );
+      },
+      loading: () => _buildAdminStatePanel(
+        context,
+        title: 'Queue',
+        subtitle: 'Loading filtered request threads...',
+        loading: true,
+      ),
+      error: (Object error, StackTrace stackTrace) => _buildAdminStatePanel(
+        context,
+        title: 'Unable to load queue threads',
+        subtitle: error.toString(),
+      ),
+    );
+  }
+
+  Widget _buildAdminStatePanel(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    bool loading = false,
+  }) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xFF111316),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.68),
+                    height: 1.35,
+                  ),
+                ),
+                if (loading) ...<Widget>[
+                  const SizedBox(height: 18),
+                  const Center(child: CircularProgressIndicator()),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionFrame(
+    BuildContext context,
+    Widget child, {
+    bool edgeToEdgeMobile = false,
+  }) {
+    final width = MediaQuery.sizeOf(context).width;
+    final isCompact = width < 600;
+    final horizontalPadding = isCompact ? (edgeToEdgeMobile ? 0.0 : 8.0) : 20.0;
+    final topPadding = isCompact ? (edgeToEdgeMobile ? 0.0 : 8.0) : 20.0;
+    final bottomPadding = isCompact ? (edgeToEdgeMobile ? 0.0 : 8.0) : 8.0;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        topPadding,
+        horizontalPadding,
+        bottomPadding,
+      ),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1480),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentSection(
+    BuildContext context,
+    AdminDashboardBundle bundle,
+    AsyncValue<List<ServiceRequestModel>> requestsAsync,
+    String currentOperatorId,
+    String currentOperatorName,
+  ) {
+    return switch (_selectedTab) {
+      _AdminTab.overview => AdminOverviewSection(
+        kpis: bundle.kpis,
+        recentRequests: bundle.recentRequests,
+        onOpenRequest: _openRequestFromOverview,
+        onOpenQueue: _openQueueOverview,
+      ),
+      _AdminTab.queue => _buildQueueTab(context, bundle, requestsAsync),
+      _AdminTab.staff => ListView(
+        padding: const EdgeInsets.only(bottom: 124),
+        children: <Widget>[AdminStaffSection(staff: bundle.staff)],
+      ),
+      _AdminTab.invites => AdminInvitesSection(
+        firstNameController: _inviteFirstNameController,
+        lastNameController: _inviteLastNameController,
+        emailController: _inviteEmailController,
+        phoneController: _invitePhoneController,
+        isInviteSubmitting: _isInviteSubmitting,
+        onSubmitInvite: _submitInvite,
+        invites: bundle.invites,
+        inviteIdsBeingDeleted: _inviteIdsBeingDeleted,
+        onCopyInvite: _copyInviteLink,
+        onDeleteInvite: _deleteInvite,
+      ),
+      _AdminTab.chats => InternalChatScreen(
+        currentUserId: currentOperatorId,
+        currentUserName: currentOperatorName,
+        viewerRole: 'admin',
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final bundleAsync = ref.watch(adminDashboardProvider);
+    final requestsAsync = ref.watch(
+      adminRequestsProvider(_currentRequestQuery()),
+    );
     final authState = ref.watch(authControllerProvider);
-    final isWide = MediaQuery.sizeOf(context).width >= 1080;
+    final internalChatUnreadAsync = ref.watch(
+      internalChatUnreadCountProvider('admin'),
+    );
+    final isCompactNav = MediaQuery.sizeOf(context).width < 900;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0D0E10),
       appBar: AppBar(
-        title: Text('Admin Dashboard · ${authState.user?.fullName ?? 'Admin'}'),
+        backgroundColor: const Color(0xFF0D0E10),
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+        ),
+        title: Text('Admin Workspace · ${authState.user?.fullName ?? 'Admin'}'),
         actions: <Widget>[
           IconButton(
             tooltip: 'Logout',
@@ -206,297 +928,60 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: bundleAsync.when(
-          data: (AdminDashboardBundle bundle) {
-            return ListView(
-              children: <Widget>[
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
-                  children: <Widget>[
-                    _KpiCard(
-                      label: 'Total Requests',
-                      value: '${bundle.kpis.totalRequests}',
-                    ),
-                    _KpiCard(
-                      label: 'Staff',
-                      value: '${bundle.kpis.staffCount}',
-                    ),
-                    _KpiCard(
-                      label: 'Pending Invites',
-                      value: '${bundle.kpis.pendingInvitesCount}',
-                    ),
-                    _KpiCard(
-                      label: 'Submitted',
-                      value: '${bundle.kpis.countsByStatus['submitted'] ?? 0}',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                Flex(
-                  direction: isWide ? Axis.horizontal : Axis.vertical,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      flex: 3,
-                      child: PanelCard(
-                        title: 'Request queue',
-                        subtitle:
-                            'Review recent work and assign staff where needed.',
-                        child: Column(
-                          children: bundle.requests.map((request) {
-                            final selectedStaffId =
-                                _selectedAssignments[request.id] ??
-                                request.assignedStaff?.id;
-
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 18),
-                              child: PanelCard(
-                                title: request.serviceLabel,
-                                subtitle:
-                                    '${request.contactFullName} · ${request.city}',
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    StatusChip(status: request.status),
-                                    const SizedBox(height: 12),
-                                    Text(request.message),
-                                    const SizedBox(height: 12),
-                                    DropdownButtonFormField<String>(
-                                      initialValue: selectedStaffId,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Assign to staff',
-                                      ),
-                                      items: bundle.staff
-                                          .map(
-                                            (
-                                              StaffMemberSummary staff,
-                                            ) => DropdownMenuItem<String>(
-                                              value: staff.id,
-                                              child: Text(
-                                                '${staff.fullName} (${staff.assignedOpenRequestCount} open)',
-                                              ),
-                                            ),
-                                          )
-                                          .toList(),
-                                      onChanged: (String? value) {
-                                        setState(
-                                          () =>
-                                              _selectedAssignments[request.id] =
-                                                  value,
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: FilledButton.tonal(
-                                        onPressed: selectedStaffId == null
-                                            ? null
-                                            : () => _assignRequest(
-                                                requestId: request.id,
-                                                staffId: selectedStaffId,
-                                              ),
-                                        child: const Text('Assign request'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: isWide ? 16 : 0, height: isWide ? 0 : 16),
-                    Expanded(
-                      flex: 2,
-                      child: Column(
-                        children: <Widget>[
-                          PanelCard(
-                            title: 'Create staff invite',
-                            subtitle:
-                                'Generate a copyable link and share it outside the app.',
-                            child: Column(
-                              children: <Widget>[
-                                TextField(
-                                  controller: _inviteFirstNameController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'First name',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _inviteLastNameController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Last name',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _inviteEmailController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Email',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _invitePhoneController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Phone',
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: FilledButton(
-                                    onPressed: _isInviteSubmitting
-                                        ? null
-                                        : _submitInvite,
-                                    child: Text(
-                                      _isInviteSubmitting
-                                          ? 'Creating...'
-                                          : 'Create invite',
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          PanelCard(
-                            title: 'Pending invite links',
-                            subtitle:
-                                'Copy these links manually and send them to new staff members.',
-                            child: Column(
-                              children: bundle.invites.isEmpty
-                                  ? <Widget>[
-                                      const Text(
-                                        'No pending staff invites yet.',
-                                      ),
-                                    ]
-                                  : bundle.invites.map((invite) {
-                                      return ListTile(
-                                        contentPadding: EdgeInsets.zero,
-                                        title: Text(
-                                          invite.fullName.isEmpty
-                                              ? invite.email
-                                              : invite.fullName,
-                                        ),
-                                        subtitle: Text(invite.inviteLink),
-                                        trailing: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: <Widget>[
-                                            IconButton(
-                                              tooltip: 'Copy invite link',
-                                              onPressed: () async {
-                                                final messenger =
-                                                    ScaffoldMessenger.of(
-                                                      context,
-                                                    );
-                                                await Clipboard.setData(
-                                                  ClipboardData(
-                                                    text: invite.inviteLink,
-                                                  ),
-                                                );
-                                                if (!mounted) {
-                                                  return;
-                                                }
-
-                                                messenger.showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Invite link copied',
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                              icon: const Icon(
-                                                Icons.copy_rounded,
-                                              ),
-                                            ),
-                                            IconButton(
-                                              tooltip: 'Remove invite link',
-                                              onPressed:
-                                                  _inviteIdsBeingDeleted
-                                                      .contains(invite.id)
-                                                  ? null
-                                                  : () => _deleteInvite(invite),
-                                              icon:
-                                                  _inviteIdsBeingDeleted
-                                                      .contains(invite.id)
-                                                  ? const SizedBox(
-                                                      width: 18,
-                                                      height: 18,
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                            strokeWidth: 2,
-                                                          ),
-                                                    )
-                                                  : const Icon(
-                                                      Icons
-                                                          .delete_outline_rounded,
-                                                    ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }).toList(),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          PanelCard(
-                            title: 'Active staff',
-                            subtitle:
-                                'Quick view of the team and their open request load.',
-                            child: Column(
-                              children: bundle.staff.map((staff) {
-                                return ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  title: Text(staff.fullName),
-                                  subtitle: Text(staff.email),
-                                  trailing: Text(
-                                    '${staff.assignedOpenRequestCount} open',
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (Object error, StackTrace stackTrace) => PanelCard(
+      body: bundleAsync.when(
+        data: (AdminDashboardBundle bundle) {
+          return _buildSectionFrame(
+            context,
+            _buildCurrentSection(
+              context,
+              bundle,
+              requestsAsync,
+              authState.user?.id ?? '',
+              authState.user?.fullName ?? 'Admin',
+            ),
+            edgeToEdgeMobile:
+                _selectedTab == _AdminTab.queue ||
+                _selectedTab == _AdminTab.chats,
+          );
+        },
+        loading: () => _buildSectionFrame(
+          context,
+          _buildAdminStatePanel(
+            context,
+            title: 'Admin workspace',
+            subtitle: 'Loading your latest requests, staff, and invite data...',
+            loading: true,
+          ),
+        ),
+        error: (Object error, StackTrace stackTrace) => _buildSectionFrame(
+          context,
+          _buildAdminStatePanel(
+            context,
             title: 'Unable to load admin dashboard',
             subtitle: error.toString(),
-            child: const SizedBox.shrink(),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _KpiCard extends StatelessWidget {
-  const _KpiCard({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 220,
-      child: PanelCard(
-        title: label,
-        child: Text(value, style: Theme.of(context).textTheme.displaySmall),
+      bottomNavigationBar: bundleAsync.maybeWhen(
+        data: (AdminDashboardBundle bundle) {
+          final internalChatUnreadCount = internalChatUnreadAsync.maybeWhen(
+            data: (count) => count,
+            orElse: () => 0,
+          );
+          return WorkspaceBottomNav(
+            items: _buildNavItems(
+              bundle,
+              internalChatUnreadCount: internalChatUnreadCount,
+            ),
+            selectedIndex: _selectedTab.index,
+            dark: true,
+            compact: isCompactNav,
+            onTap: (int index) {
+              setState(() => _selectedTab = _AdminTab.values[index]);
+            },
+          );
+        },
+        orElse: () => null,
       ),
     );
   }

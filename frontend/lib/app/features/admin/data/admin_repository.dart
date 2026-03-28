@@ -1,6 +1,6 @@
 /// WHAT: Calls admin endpoints for dashboard overview, request assignment, staff, and invite management.
 /// WHY: Admin screens need a single repository to gather the multiple payloads that feed the dashboard.
-/// HOW: Fetch each compact endpoint, parse the returned models, and expose small admin actions.
+/// HOW: Fetch compact summary endpoints, load the queue with backend filters, and expose small admin actions.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,18 +19,13 @@ class AdminRepository {
   final ApiClient _client;
 
   Future<AdminDashboardBundle> fetchDashboardBundle() async {
+    // WHY: Keep the summary bundle focused on KPI, staffing, and invite data so queue filtering can refetch independently.
     final dashboard = await _client.getJson('/admin/dashboard');
-    final requests = await _client.getJson('/admin/requests');
     final staff = await _client.getJson('/admin/staff');
     final invites = await _client.getJson('/admin/staff/invites');
 
     final recentRequests =
         (dashboard['recentRequests'] as List<dynamic>? ?? const <dynamic>[])
-            .whereType<Map<String, dynamic>>()
-            .map(ServiceRequestModel.fromJson)
-            .toList();
-    final requestItems =
-        (requests['requests'] as List<dynamic>? ?? const <dynamic>[])
             .whereType<Map<String, dynamic>>()
             .map(ServiceRequestModel.fromJson)
             .toList();
@@ -49,10 +44,28 @@ class AdminRepository {
         dashboard['kpis'] as Map<String, dynamic>? ?? const <String, dynamic>{},
       ),
       recentRequests: recentRequests,
-      requests: requestItems,
       staff: staffItems,
       invites: inviteItems,
     );
+  }
+
+  Future<List<ServiceRequestModel>> fetchRequests({
+    String? status,
+    String? search,
+  }) async {
+    // WHY: Push queue filtering to the backend so the admin request workspace remains usable as request volume grows.
+    final response = await _client.getJson(
+      '/admin/requests',
+      queryParameters: <String, dynamic>{
+        if (status != null && status.isNotEmpty) 'status': status,
+        if (search != null && search.isNotEmpty) 'search': search,
+      },
+    );
+
+    return (response['requests'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map(ServiceRequestModel.fromJson)
+        .toList();
   }
 
   Future<void> assignRequest({
@@ -62,6 +75,37 @@ class AdminRepository {
     await _client.patchJson(
       '/admin/requests/$requestId/assign',
       data: <String, dynamic>{'staffId': staffId},
+    );
+  }
+
+  Future<void> sendInvoice({
+    required String requestId,
+    required double amount,
+    required String dueDate,
+    required String paymentMethod,
+    required String paymentInstructions,
+    String? note,
+  }) async {
+    await _client.postJson(
+      '/admin/requests/$requestId/invoice',
+      data: <String, dynamic>{
+        'amount': amount,
+        'dueDate': dueDate,
+        'paymentMethod': paymentMethod,
+        'paymentInstructions': paymentInstructions,
+        'note': note,
+      },
+    );
+  }
+
+  Future<void> reviewPaymentProof({
+    required String requestId,
+    required String decision,
+    String? reviewNote,
+  }) async {
+    await _client.patchJson(
+      '/admin/requests/$requestId/invoice/proof/review',
+      data: <String, dynamic>{'decision': decision, 'reviewNote': reviewNote},
     );
   }
 

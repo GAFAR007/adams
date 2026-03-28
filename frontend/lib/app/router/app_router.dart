@@ -28,8 +28,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final location = state.matchedLocation;
       final isAdminProtected = location == '/admin';
       final isStaffProtected = location == '/staff';
-      final isCustomerProtected = location == '/app/requests' || location == '/app/requests/new';
-      final isPublicAuthRoute = location == '/login' ||
+      final isCustomerProtected =
+          location == '/app/requests' ||
+          location == '/app/requests/new' ||
+          location.startsWith('/app/requests/');
+      final isPublicAuthRoute =
+          location == '/login' ||
           location == '/register' ||
           location == '/admin/login' ||
           location == '/staff/login' ||
@@ -82,49 +86,67 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: <RouteBase>[
       GoRoute(
         path: '/splash',
-        builder: (BuildContext context, GoRouterState state) => const _StartupScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const _StartupScreen(),
       ),
       GoRoute(
         path: '/',
-        builder: (BuildContext context, GoRouterState state) => const HomeScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const HomeScreen(),
       ),
       GoRoute(
         path: '/login',
-        builder: (BuildContext context, GoRouterState state) => const CustomerLoginScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const CustomerLoginScreen(),
       ),
       GoRoute(
         path: '/register',
-        builder: (BuildContext context, GoRouterState state) => const CustomerRegisterScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const CustomerRegisterScreen(),
       ),
       GoRoute(
         path: '/admin/login',
-        builder: (BuildContext context, GoRouterState state) => const AdminLoginScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const AdminLoginScreen(),
       ),
       GoRoute(
         path: '/staff/login',
-        builder: (BuildContext context, GoRouterState state) => const StaffLoginScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const StaffLoginScreen(),
       ),
       GoRoute(
         path: '/staff/register/:token',
-        builder: (BuildContext context, GoRouterState state) => StaffRegisterScreen(
-          inviteToken: state.pathParameters['token'] ?? '',
-        ),
+        builder: (BuildContext context, GoRouterState state) =>
+            StaffRegisterScreen(
+              inviteToken: state.pathParameters['token'] ?? '',
+            ),
       ),
       GoRoute(
         path: '/app/requests',
-        builder: (BuildContext context, GoRouterState state) => const CustomerRequestsScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const CustomerRequestsScreen(),
       ),
       GoRoute(
         path: '/app/requests/new',
-        builder: (BuildContext context, GoRouterState state) => const CustomerCreateRequestScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const CustomerCreateRequestScreen(),
+      ),
+      GoRoute(
+        path: '/app/requests/:requestId/edit',
+        builder: (BuildContext context, GoRouterState state) =>
+            CustomerCreateRequestScreen(
+              requestId: state.pathParameters['requestId'],
+            ),
       ),
       GoRoute(
         path: '/admin',
-        builder: (BuildContext context, GoRouterState state) => const AdminDashboardScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const AdminDashboardScreen(),
       ),
       GoRoute(
         path: '/staff',
-        builder: (BuildContext context, GoRouterState state) => const StaffDashboardScreen(),
+        builder: (BuildContext context, GoRouterState state) =>
+            const StaffDashboardScreen(),
       ),
     ],
   );
@@ -144,10 +166,6 @@ class _StartupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }

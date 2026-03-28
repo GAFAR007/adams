@@ -120,6 +120,35 @@ class ApiClient {
     }
   }
 
+  Future<Map<String, dynamic>> postFormData(
+    String path, {
+    required FormData data,
+  }) async {
+    try {
+      final response = await _dio.post<Object>(
+        path,
+        data: data,
+        options: Options(contentType: 'multipart/form-data'),
+      );
+      return _normalizeResponse(response.data);
+    } on DioException catch (error) {
+      final fallbackResponse = await _retryWithLoopbackFallback(
+        error,
+        () => _dio.post<Object>(
+          path,
+          data: data,
+          options: Options(contentType: 'multipart/form-data'),
+        ),
+      );
+
+      if (fallbackResponse != null) {
+        return _normalizeResponse(fallbackResponse.data);
+      }
+
+      throw ApiException(_extractMessage(error));
+    }
+  }
+
   Future<Map<String, dynamic>> deleteJson(String path) async {
     try {
       final response = await _dio.delete<Object>(path);
