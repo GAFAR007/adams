@@ -9,6 +9,8 @@ const bcrypt = require('bcryptjs');
 const {
   ERROR_CLASSIFICATIONS,
   LOG_STEPS,
+  PAYMENT_REQUEST_STATUSES,
+  REQUEST_MESSAGE_ACTIONS,
   REQUEST_STATUSES,
   STAFF_AVAILABILITIES,
   USER_ROLES,
@@ -23,6 +25,13 @@ const {
   buildStaffMessage,
   buildSystemMessage,
 } = require('../utils/request-chat');
+const {
+  applyInvoiceReview,
+  buildInvoiceRequestMessage,
+  buildProofReviewMessage,
+  createInvoiceRecord,
+  invoiceNeedsCustomerProof,
+} = require('../utils/request-payment');
 const { serializeServiceRequest, serializeUser } = require('../utils/serializers');
 const { issueSessionTokens, verifyStaffInviteToken } = require('./token.service');
 
@@ -30,6 +39,9 @@ const STAFF_MANAGEABLE_STATUSES = [
   REQUEST_STATUSES.UNDER_REVIEW,
   REQUEST_STATUSES.QUOTED,
   REQUEST_STATUSES.APPOINTMENT_CONFIRMED,
+  REQUEST_STATUSES.PENDING_START,
+  REQUEST_STATUSES.PROJECT_STARTED,
+  REQUEST_STATUSES.WORK_DONE,
   REQUEST_STATUSES.CLOSED,
 ];
 
@@ -38,6 +50,9 @@ const STAFF_OPEN_STATUSES = [
   REQUEST_STATUSES.UNDER_REVIEW,
   REQUEST_STATUSES.QUOTED,
   REQUEST_STATUSES.APPOINTMENT_CONFIRMED,
+  REQUEST_STATUSES.PENDING_START,
+  REQUEST_STATUSES.PROJECT_STARTED,
+  REQUEST_STATUSES.WORK_DONE,
 ];
 
 function startOfToday() {
@@ -177,6 +192,7 @@ async function getDashboard(staffUserId, logContext) {
     assignedCount,
     quotedCount,
     confirmedCount,
+    pendingStartCount,
     clearedTodayCount,
     queueRequests,
     recentRequests,
@@ -197,6 +213,10 @@ async function getDashboard(staffUserId, logContext) {
     ServiceRequest.countDocuments({
       assignedStaff: staffUserId,
       status: REQUEST_STATUSES.APPOINTMENT_CONFIRMED,
+    }),
+    ServiceRequest.countDocuments({
+      assignedStaff: staffUserId,
+      status: REQUEST_STATUSES.PENDING_START,
     }),
     ServiceRequest.countDocuments({
       assignedStaff: staffUserId,
@@ -246,6 +266,7 @@ async function getDashboard(staffUserId, logContext) {
       assignedCount,
       quotedCount,
       confirmedCount,
+      pendingStartCount,
       clearedTodayCount,
     },
     queueRequests: queueRequests.map(serializeServiceRequest),
@@ -471,7 +492,13 @@ async function attendQueueRequest(staffUserId, requestId, logContext) {
   };
 }
 
-async function postAssignedRequestMessage(staffUserId, requestId, text, logContext) {
+async function postAssignedRequestMessage(
+  staffUserId,
+  requestId,
+  text,
+  actionType,
+  logContext,
+) {
   logInfo({
     ...logContext,
     step: LOG_STEPS.SERVICE_START,
@@ -519,6 +546,7 @@ async function postAssignedRequestMessage(staffUserId, requestId, text, logConte
     buildStaffMessage({
       staffId: staffUserId,
       staffName: `${staff.firstName} ${staff.lastName}`.trim(),
+      actionType,
       text,
     }),
   );
@@ -537,6 +565,186 @@ async function postAssignedRequestMessage(staffUserId, requestId, text, logConte
 
   return {
     message: 'Reply sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function createAssignedRequestInvoice(staffUserId, requestId, payload, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'StaffCreateRequestInvoice',
+    intent: 'Create and send an invoice from the assigned request conversation',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'StaffCreateRequestInvoice',
+    intent: 'Load the assigned request and current staff member before creating an invoice',
+  });
+
+  const [staff, request] = await Promise.all([
+    loadActiveStaffUser(staffUserId),
+    loadAssignedRequest(requestId, staffUserId),
+  ]);
+
+  if (!staff) {
+    throw new AppError({
+      message: 'Staff account not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_INVOICE_USER_NOT_FOUND',
+      resolutionHint: 'Log in again and try once more',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (!request) {
+    throw new AppError({
+      message: 'Assigned request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_INVOICE_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your dashboard and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot receive new invoices',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_INVOICE_REQUEST_CLOSED',
+      resolutionHint: 'Reopen the workflow before billing again',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  request.invoice = createInvoiceRecord({
+    requestId: request.id,
+    amount: payload.amount,
+    dueDate: payload.dueDate || null,
+    paymentMethod: payload.paymentMethod,
+    paymentInstructions: payload.paymentInstructions,
+    note: payload.note,
+    actorUserId: staffUserId,
+    actorRole: USER_ROLES.STAFF,
+  });
+  request.messages.push(
+    buildStaffMessage({
+      staffId: staffUserId,
+      staffName: `${staff.firstName} ${staff.lastName}`.trim(),
+      actionType: invoiceNeedsCustomerProof(request.invoice)
+        ? REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPLOAD_PAYMENT_PROOF
+        : null,
+      text: buildInvoiceRequestMessage(request.invoice),
+    }),
+  );
+  request.attendedAt = request.attendedAt || new Date();
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'StaffCreateRequestInvoice',
+    intent: 'Confirm the invoice was attached to the assigned request and sent into the chat',
+  });
+
+  return {
+    message: 'Invoice sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function reviewAssignedRequestPaymentProof(
+  staffUserId,
+  requestId,
+  decision,
+  reviewNote,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'StaffReviewPaymentProof',
+    intent: 'Approve or reject a customer payment proof for an assigned request',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'StaffReviewPaymentProof',
+    intent: 'Load the assigned request before changing invoice proof status',
+  });
+
+  const request = await loadAssignedRequest(requestId, staffUserId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Assigned request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_REVIEW_PAYMENT_PROOF_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your dashboard and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (!request.invoice) {
+    throw new AppError({
+      message: 'No invoice exists on this request yet',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_REVIEW_PAYMENT_PROOF_INVOICE_MISSING',
+      resolutionHint: 'Send an invoice before reviewing payment proof',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (request.invoice.status !== PAYMENT_REQUEST_STATUSES.PROOF_SUBMITTED) {
+    throw new AppError({
+      message: 'There is no payment proof waiting for review on this request',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_REVIEW_PAYMENT_PROOF_STATUS_INVALID',
+      resolutionHint: 'Refresh the request and check the latest invoice status',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  applyInvoiceReview(request.invoice, {
+    decision,
+    actorUserId: staffUserId,
+    actorRole: USER_ROLES.STAFF,
+    reviewNote,
+  });
+  if (decision === 'approved' && request.status !== REQUEST_STATUSES.CLOSED) {
+    request.status = REQUEST_STATUSES.PENDING_START;
+  }
+  request.messages.push(
+    buildSystemMessage(buildProofReviewMessage(request.invoice, decision)),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'StaffReviewPaymentProof',
+    intent: 'Confirm the invoice proof review decision was saved for the assigned request',
+  });
+
+  return {
+    message: decision === 'approved'
+      ? 'Payment proof approved'
+      : 'Payment proof rejected',
     request: serializeServiceRequest(request),
   };
 }
@@ -585,6 +793,15 @@ async function updateAssignedRequestStatus(staffUserId, requestId, status, logCo
 
   request.status = status;
   request.attendedAt = request.attendedAt || new Date();
+  if (status === REQUEST_STATUSES.PROJECT_STARTED) {
+    request.projectStartedAt = request.projectStartedAt || new Date();
+  }
+  if (
+    status === REQUEST_STATUSES.WORK_DONE ||
+    status === REQUEST_STATUSES.CLOSED
+  ) {
+    request.finishedAt = request.finishedAt || new Date();
+  }
   request.closedAt = status === REQUEST_STATUSES.CLOSED ? new Date() : null;
   request.messages.push(
     buildSystemMessage(`Request status changed to ${status.replace(/_/g, ' ')}.`),
@@ -607,10 +824,12 @@ async function updateAssignedRequestStatus(staffUserId, requestId, status, logCo
 
 module.exports = {
   attendQueueRequest,
+  createAssignedRequestInvoice,
   getDashboard,
   listAssignedRequests,
   postAssignedRequestMessage,
   registerFromInvite,
+  reviewAssignedRequestPaymentProof,
   updateAssignedRequestStatus,
   updateAvailability,
 };

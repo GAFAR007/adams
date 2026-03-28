@@ -6,7 +6,7 @@
 
 const { body, param } = require('express-validator');
 
-const customerCreateRequestValidator = [
+const customerRequestFieldsValidator = [
   body('serviceType').trim().notEmpty().withMessage('Service type is required'),
   body('addressLine1').trim().notEmpty().withMessage('Address line is required'),
   body('city').trim().notEmpty().withMessage('City is required'),
@@ -19,6 +19,13 @@ const customerCreateRequestValidator = [
     .withMessage('Message must be at least 10 characters long'),
 ];
 
+const customerCreateRequestValidator = [...customerRequestFieldsValidator];
+
+const customerUpdateRequestValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  ...customerRequestFieldsValidator,
+];
+
 const customerPostRequestMessageValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
   body('message')
@@ -27,7 +34,28 @@ const customerPostRequestMessageValidator = [
     .withMessage('Message must be between 1 and 2000 characters'),
 ];
 
+const customerUploadPaymentProofValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('note')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Proof note must be 500 characters or fewer'),
+];
+
+const customerUploadRequestAttachmentValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('caption')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Attachment caption must be 500 characters or fewer'),
+];
+
 module.exports = {
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
+  customerUploadPaymentProofValidator,
+  customerUploadRequestAttachmentValidator,
+  customerUpdateRequestValidator,
 };

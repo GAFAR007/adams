@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const express = require('express');
 const helmet = require('helmet');
+const path = require('path');
 
 const { env } = require('./config/env');
 const { notFoundMiddleware } = require('./middleware/not-found.middleware');
@@ -85,6 +86,8 @@ function buildApp() {
     res.status(200).json({ message: 'Backend is healthy' });
   });
 
+  // WHY: Uploaded payment-proof files need a stable public path so staff and admins can review them from the app.
+  app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
   // WHY: Mount all versioned API routes together so future versions can coexist cleanly.
   app.use('/api/v1', createApiRouter());
   // WHY: Missing-route handling must run after all known routes have had a chance to match.

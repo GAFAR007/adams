@@ -153,6 +153,50 @@ const staffPostRequestMessageController = asyncHandler(async (req, res) => {
     req.authUser.id,
     req.params.requestId,
     req.body.message,
+    req.body.actionType,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffCreateRequestInvoiceController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffCreateRequestInvoice',
+    intent: 'Send an invoice and payment instructions from the assigned staff chat',
+  });
+
+  const result = await staffService.createAssignedRequestInvoice(
+    req.authUser.id,
+    req.params.requestId,
+    req.body,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffReviewPaymentProofController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffReviewPaymentProof',
+    intent: 'Approve or reject customer payment proof from the assigned staff chat',
+  });
+
+  const result = await staffService.reviewAssignedRequestPaymentProof(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.decision,
+    req.body.reviewNote,
     logContext,
   );
   res.status(200).json(result);
@@ -165,9 +209,11 @@ const staffPostRequestMessageController = asyncHandler(async (req, res) => {
 
 module.exports = {
   staffAttendQueueRequestController,
+  staffCreateRequestInvoiceController,
   staffDashboardController,
   staffListRequestsController,
   staffPostRequestMessageController,
+  staffReviewPaymentProofController,
   staffRegisterController,
   staffUpdateAvailabilityController,
   staffUpdateRequestStatusController,

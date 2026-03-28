@@ -7,6 +7,9 @@
 const {
   ERROR_CLASSIFICATIONS,
   LOG_STEPS,
+  PAYMENT_METHODS,
+  PAYMENT_REQUEST_STATUSES,
+  REQUEST_MESSAGE_ACTIONS,
   REQUEST_SOURCES,
   REQUEST_STATUSES,
   USER_ROLES,
@@ -19,8 +22,13 @@ const { logInfo } = require('../utils/logger');
 const {
   buildAiMessage,
   buildCustomerMessage,
+  buildRequestMessageAttachment,
   buildSystemMessage,
 } = require('../utils/request-chat');
+const {
+  attachProofToInvoice,
+  buildProofUploadedMessage,
+} = require('../utils/request-payment');
 const { serializeServiceRequest } = require('../utils/serializers');
 
 function buildWaitingAiText() {
@@ -78,6 +86,7 @@ async function createRequest(customerUserId, payload, logContext) {
     });
   }
 
+  const detailsUpdatedAt = new Date();
   // WHY: Seed the thread immediately so the customer lands in a queue with visible conversation context instead of silence.
   const request = await ServiceRequest.create({
     customer: customer._id,
@@ -91,6 +100,7 @@ async function createRequest(customerUserId, payload, logContext) {
     },
     preferredDate: payload.preferredDate || null,
     preferredTimeWindow: payload.preferredTimeWindow || '',
+    detailsUpdatedAt,
     message: payload.message,
     contactSnapshot: {
       fullName: `${customer.firstName} ${customer.lastName}`.trim(),
@@ -226,8 +236,290 @@ async function postRequestMessage(customerUserId, requestId, text, logContext) {
   };
 }
 
+async function updateRequest(customerUserId, requestId, payload, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'CustomerUpdateRequest',
+    intent: 'Persist edited request details for a customer-owned service request',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'CustomerUpdateRequest',
+    intent: 'Load the owned request before applying edited service details',
+  });
+
+  const request = await loadOwnedRequest(customerUserId, requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_UPDATE_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot be edited',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_UPDATE_REQUEST_CLOSED',
+      resolutionHint: 'Open a new request or continue the thread for reference only',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  request.serviceType = payload.serviceType;
+  request.location.addressLine1 = payload.addressLine1;
+  request.location.city = payload.city;
+  request.location.postalCode = payload.postalCode;
+  request.preferredDate = payload.preferredDate || null;
+  request.preferredTimeWindow = payload.preferredTimeWindow || '';
+  request.message = payload.message;
+  request.detailsUpdatedAt = new Date();
+  request.messages.push(
+    buildSystemMessage(
+      'Customer updated the request details. Review the latest request brief for the new address, timing, and work scope.',
+    ),
+  );
+
+  const lastMessage = request.messages[request.messages.length - 2];
+  const shouldClearPendingUpdateAction =
+    lastMessage?.actionType === REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPDATE_REQUEST;
+
+  if (!request.assignedStaff && shouldClearPendingUpdateAction) {
+    request.messages.push(
+      buildAiMessage(
+        'Your request details were updated successfully. I kept the queue thread aligned with the latest information.',
+      ),
+    );
+  }
+
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'CustomerUpdateRequest',
+    intent: 'Confirm the owned request details were updated successfully',
+  });
+
+  return {
+    message: 'Request updated successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function uploadPaymentProof(customerUserId, requestId, file, note, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'CustomerUploadPaymentProof',
+    intent: 'Attach customer payment proof to the latest invoice on an owned request',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'CustomerUploadPaymentProof',
+    intent: 'Load the owned request and its invoice before accepting a proof file',
+  });
+
+  const request = await loadOwnedRequest(customerUserId, requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept new payment proof uploads',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_REQUEST_CLOSED',
+      resolutionHint: 'Open a new request if you need to continue with another job',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!file) {
+    throw new AppError({
+      message: 'Payment proof file is required',
+      statusCode: 400,
+      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_FILE_REQUIRED',
+      resolutionHint: 'Choose a PNG, JPG, or PDF file and try again',
+      step: LOG_STEPS.VALIDATION_FAIL,
+    });
+  }
+
+  if (!request.invoice) {
+    throw new AppError({
+      message: 'No invoice is waiting for payment proof on this request',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_INVOICE_MISSING',
+      resolutionHint: 'Wait for staff or admin to send an invoice first',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (request.invoice.paymentMethod !== PAYMENT_METHODS.SEPA_BANK_TRANSFER) {
+    throw new AppError({
+      message: 'This invoice does not require an uploaded payment proof',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_NOT_REQUIRED',
+      resolutionHint: 'Follow the payment option shown on the invoice details',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (
+    request.invoice.status !== PAYMENT_REQUEST_STATUSES.SENT &&
+    request.invoice.status !== PAYMENT_REQUEST_STATUSES.REJECTED
+  ) {
+    throw new AppError({
+      message: 'This invoice is not waiting for a new payment proof upload',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_PAYMENT_PROOF_STATUS_INVALID',
+      resolutionHint: 'Refresh the chat to check the latest payment status',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  attachProofToInvoice(request.invoice, file, note);
+  request.messages.push(buildSystemMessage(buildProofUploadedMessage(request.invoice)));
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'CustomerUploadPaymentProof',
+    intent: 'Confirm the payment proof was attached to the owned request invoice',
+  });
+
+  return {
+    message: 'Payment proof uploaded successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function uploadRequestAttachment(
+  customerUserId,
+  requestId,
+  file,
+  caption,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'CustomerUploadRequestAttachment',
+    intent: 'Attach a customer document or image directly to an owned request thread',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'CustomerUploadRequestAttachment',
+    intent: 'Load the owned request thread before adding a file attachment message',
+  });
+
+  const request = await loadOwnedRequest(customerUserId, requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Request thread not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept new chat attachments',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_REQUEST_CLOSED',
+      resolutionHint: 'Open a new request if you need to continue with another job',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!file) {
+    throw new AppError({
+      message: 'Attachment file is required',
+      statusCode: 400,
+      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
+      errorCode: 'CUSTOMER_ATTACHMENT_FILE_REQUIRED',
+      resolutionHint: 'Choose a file and try again',
+      step: LOG_STEPS.VALIDATION_FAIL,
+    });
+  }
+
+  const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
+  const relativeUrl = `/uploads/request-attachments/${file.filename}`;
+  request.messages.push(
+    buildCustomerMessage({
+      customerId: customerUserId,
+      customerName: request.contactSnapshot.fullName,
+      text:
+        trimmedCaption.length === 0
+          ? `Shared a file: ${file.originalname || 'attachment'}`
+          : trimmedCaption,
+      attachment: buildRequestMessageAttachment(file, relativeUrl),
+    }),
+  );
+
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'CustomerUploadRequestAttachment',
+    intent: 'Confirm the customer file was appended to the owned request thread',
+  });
+
+  return {
+    message: request.assignedStaff
+      ? 'Attachment sent to the assigned staff thread'
+      : 'Attachment added to the queue while you wait for staff',
+    request: serializeServiceRequest(request),
+  };
+}
+
 module.exports = {
   createRequest,
   listRequests,
   postRequestMessage,
+  uploadRequestAttachment,
+  uploadPaymentProof,
+  updateRequest,
 };

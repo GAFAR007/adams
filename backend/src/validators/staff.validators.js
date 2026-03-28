@@ -5,6 +5,10 @@
  */
 
 const { body, param, query } = require('express-validator');
+const {
+  PAYMENT_METHODS,
+  REQUEST_MESSAGE_ACTIONS,
+} = require('../constants/app.constants');
 
 const staffRegisterValidator = [
   body('inviteToken').trim().notEmpty().withMessage('Invite token is required'),
@@ -42,13 +46,56 @@ const staffPostRequestMessageValidator = [
     .trim()
     .isLength({ min: 1, max: 2000 })
     .withMessage('Message must be between 1 and 2000 characters'),
+  body('actionType')
+    .optional({ nullable: true })
+    .isIn(Object.values(REQUEST_MESSAGE_ACTIONS))
+    .withMessage('Action type is invalid'),
+];
+
+const staffCreateRequestInvoiceValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('amount')
+    .isFloat({ gt: 0 })
+    .withMessage('Invoice amount must be greater than zero'),
+  body('dueDate')
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage('Due date must be a valid ISO date'),
+  body('paymentMethod')
+    .trim()
+    .isIn(Object.values(PAYMENT_METHODS))
+    .withMessage('Payment method is invalid'),
+  body('paymentInstructions')
+    .trim()
+    .isLength({ min: 4, max: 2000 })
+    .withMessage('Payment instructions must be between 4 and 2000 characters'),
+  body('note')
+    .optional()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Invoice note must be 2000 characters or fewer'),
+];
+
+const staffReviewPaymentProofValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('decision')
+    .trim()
+    .isIn(['approved', 'rejected'])
+    .withMessage('Decision must be approved or rejected'),
+  body('reviewNote')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Review note must be 500 characters or fewer'),
 ];
 
 module.exports = {
   staffAttendQueueRequestValidator,
+  staffCreateRequestInvoiceValidator,
   staffPostRequestMessageValidator,
   staffRegisterValidator,
   staffRequestFiltersValidator,
+  staffReviewPaymentProofValidator,
   staffUpdateAvailabilityValidator,
   staffUpdateRequestStatusValidator,
 };

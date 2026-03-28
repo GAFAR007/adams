@@ -10,6 +10,9 @@ const {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerUploadPaymentProofController,
+  customerUploadRequestAttachmentController,
+  customerUpdateRequestController,
 } = require("../controllers/customer.controller");
 const {
   USER_ROLES,
@@ -19,11 +22,18 @@ const {
   requireRoles,
 } = require("../middleware/auth.middleware");
 const {
+  paymentProofUploadMiddleware,
+  requestAttachmentUploadMiddleware,
+} = require("../middleware/upload.middleware");
+const {
   validateRequest,
 } = require("../middleware/validate.middleware");
 const {
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
+  customerUploadPaymentProofValidator,
+  customerUploadRequestAttachmentValidator,
+  customerUpdateRequestValidator,
 } = require("../validators/customer.validators");
 
 function createCustomerRouter() {
@@ -43,6 +53,26 @@ function createCustomerRouter() {
   router.get(
     "/requests",
     customerListRequestsController,
+  );
+  router.patch(
+    "/requests/:requestId",
+    customerUpdateRequestValidator,
+    validateRequest,
+    customerUpdateRequestController,
+  );
+  router.post(
+    "/requests/:requestId/invoice/proof",
+    paymentProofUploadMiddleware,
+    customerUploadPaymentProofValidator,
+    validateRequest,
+    customerUploadPaymentProofController,
+  );
+  router.post(
+    "/requests/:requestId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    customerUploadRequestAttachmentValidator,
+    validateRequest,
+    customerUploadRequestAttachmentController,
   );
   router.post(
     "/requests/:requestId/messages",

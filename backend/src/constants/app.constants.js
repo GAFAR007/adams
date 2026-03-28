@@ -27,14 +27,35 @@ const REQUEST_STATUSES = Object.freeze({
   ASSIGNED: 'assigned',
   QUOTED: 'quoted',
   APPOINTMENT_CONFIRMED: 'appointment_confirmed',
+  PENDING_START: 'pending_start',
+  PROJECT_STARTED: 'project_started',
+  WORK_DONE: 'work_done',
   CLOSED: 'closed',
 });
 
 const REQUEST_MESSAGE_SENDERS = Object.freeze({
   CUSTOMER: 'customer',
   STAFF: 'staff',
+  ADMIN: 'admin',
   SYSTEM: 'system',
   AI: 'ai',
+});
+
+const REQUEST_MESSAGE_ACTIONS = Object.freeze({
+  CUSTOMER_UPDATE_REQUEST: 'customer_update_request',
+  CUSTOMER_UPLOAD_PAYMENT_PROOF: 'customer_upload_payment_proof',
+});
+
+const PAYMENT_METHODS = Object.freeze({
+  SEPA_BANK_TRANSFER: 'sepa_bank_transfer',
+  CASH_ON_COMPLETION: 'cash_on_completion',
+});
+
+const PAYMENT_REQUEST_STATUSES = Object.freeze({
+  SENT: 'sent',
+  PROOF_SUBMITTED: 'proof_submitted',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
 });
 
 const REQUEST_SOURCES = Object.freeze({
@@ -89,6 +110,9 @@ module.exports = {
   REQUEST_SOURCES,
   REQUEST_STATUSES,
   REQUEST_MESSAGE_SENDERS,
+  REQUEST_MESSAGE_ACTIONS,
+  PAYMENT_METHODS,
+  PAYMENT_REQUEST_STATUSES,
   SERVICE_TYPES,
   STAFF_AVAILABILITIES,
   USER_ROLES,

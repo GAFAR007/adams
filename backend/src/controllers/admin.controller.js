@@ -61,6 +61,49 @@ const adminAssignRequestController = asyncHandler(async (req, res) => {
   });
 });
 
+const adminCreateRequestInvoiceController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminCreateRequestInvoice',
+    intent: 'Send an invoice and payment instructions from the admin request workspace',
+  });
+
+  const result = await adminService.createRequestInvoice(
+    req.authUser,
+    req.params.requestId,
+    req.body,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminReviewPaymentProofController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminReviewPaymentProof',
+    intent: 'Approve or reject a customer payment proof from the admin request workspace',
+  });
+
+  const result = await adminService.reviewPaymentProof(
+    req.authUser,
+    req.params.requestId,
+    req.body.decision,
+    req.body.reviewNote,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const adminListStaffController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -131,10 +174,12 @@ const adminListStaffInvitesController = asyncHandler(async (req, res) => {
 
 module.exports = {
   adminAssignRequestController,
+  adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
   adminListStaffController,
   adminListStaffInvitesController,
+  adminReviewPaymentProofController,
 };

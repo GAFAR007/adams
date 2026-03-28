@@ -8,13 +8,22 @@ const express = require("express");
 
 const {
   adminAssignRequestController,
+  adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
   adminListStaffController,
   adminListStaffInvitesController,
+  adminReviewPaymentProofController,
 } = require("../controllers/admin.controller");
+const {
+  createDirectInternalChatController,
+  createGroupInternalChatController,
+  listInternalChatsController,
+  markInternalChatReadController,
+  postInternalChatMessageController,
+} = require("../controllers/internal-chat.controller");
 const {
   USER_ROLES,
 } = require("../constants/app.constants");
@@ -27,10 +36,18 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   adminAssignRequestValidator,
+  adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
   adminDeleteStaffInviteValidator,
   adminRequestFiltersValidator,
+  adminReviewPaymentProofValidator,
 } = require("../validators/admin.validators");
+const {
+  createDirectInternalChatValidator,
+  createGroupInternalChatValidator,
+  markInternalChatReadValidator,
+  postInternalChatMessageValidator,
+} = require("../validators/internal-chat.validators");
 
 function createAdminRouter() {
   const router = express.Router();
@@ -56,6 +73,18 @@ function createAdminRouter() {
     validateRequest,
     adminAssignRequestController,
   );
+  router.post(
+    "/requests/:requestId/invoice",
+    adminCreateRequestInvoiceValidator,
+    validateRequest,
+    adminCreateRequestInvoiceController,
+  );
+  router.patch(
+    "/requests/:requestId/invoice/proof/review",
+    adminReviewPaymentProofValidator,
+    validateRequest,
+    adminReviewPaymentProofController,
+  );
   router.get(
     "/staff",
     adminListStaffController,
@@ -75,6 +104,34 @@ function createAdminRouter() {
   router.get(
     "/staff/invites",
     adminListStaffInvitesController,
+  );
+  router.get(
+    "/internal-chats",
+    listInternalChatsController,
+  );
+  router.post(
+    "/internal-chats/direct",
+    createDirectInternalChatValidator,
+    validateRequest,
+    createDirectInternalChatController,
+  );
+  router.post(
+    "/internal-chats/groups",
+    createGroupInternalChatValidator,
+    validateRequest,
+    createGroupInternalChatController,
+  );
+  router.post(
+    "/internal-chats/:threadId/messages",
+    postInternalChatMessageValidator,
+    validateRequest,
+    postInternalChatMessageController,
+  );
+  router.post(
+    "/internal-chats/:threadId/read",
+    markInternalChatReadValidator,
+    validateRequest,
+    markInternalChatReadController,
   );
 
   return router;

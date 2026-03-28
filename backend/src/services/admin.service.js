@@ -9,6 +9,8 @@ const { randomUUID } = require('crypto');
 const {
   ERROR_CLASSIFICATIONS,
   LOG_STEPS,
+  PAYMENT_REQUEST_STATUSES,
+  REQUEST_MESSAGE_ACTIONS,
   REQUEST_STATUSES,
   STAFF_AVAILABILITIES,
   USER_ROLES,
@@ -20,7 +22,17 @@ const { StaffInvite } = require('../models/staff-invite.model');
 const { User } = require('../models/user.model');
 const { AppError } = require('../utils/app-error');
 const { logInfo } = require('../utils/logger');
-const { buildSystemMessage } = require('../utils/request-chat');
+const {
+  buildAdminMessage,
+  buildSystemMessage,
+} = require('../utils/request-chat');
+const {
+  applyInvoiceReview,
+  buildInvoiceRequestMessage,
+  buildProofReviewMessage,
+  createInvoiceRecord,
+  invoiceNeedsCustomerProof,
+} = require('../utils/request-payment');
 const { serializeServiceRequest, serializeStaffInvite, serializeUser } = require('../utils/serializers');
 const { buildStaffInviteLink } = require('./token.service');
 
@@ -76,6 +88,9 @@ async function getDashboard(logContext) {
           REQUEST_STATUSES.UNDER_REVIEW,
           REQUEST_STATUSES.QUOTED,
           REQUEST_STATUSES.APPOINTMENT_CONFIRMED,
+          REQUEST_STATUSES.PENDING_START,
+          REQUEST_STATUSES.PROJECT_STARTED,
+          REQUEST_STATUSES.WORK_DONE,
         ],
       },
     }),
@@ -265,6 +280,171 @@ async function assignRequest(requestId, staffId, logContext) {
   };
 }
 
+async function loadAdminVisibleRequest(requestId) {
+  return ServiceRequest.findById(requestId)
+    .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
+    .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt');
+}
+
+async function createRequestInvoice(adminUser, requestId, payload, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'AdminCreateRequestInvoice',
+    intent: 'Create and send an invoice from the admin request workspace',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'AdminCreateRequestInvoice',
+    intent: 'Load the target request before attaching a new invoice',
+  });
+
+  const request = await loadAdminVisibleRequest(requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Service request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_INVOICE_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh the request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot receive new invoices',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_INVOICE_REQUEST_CLOSED',
+      resolutionHint: 'Continue billing from an open request only',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  request.invoice = createInvoiceRecord({
+    requestId: request.id,
+    amount: payload.amount,
+    dueDate: payload.dueDate || null,
+    paymentMethod: payload.paymentMethod,
+    paymentInstructions: payload.paymentInstructions,
+    note: payload.note,
+    actorUserId: adminUser.id,
+    actorRole: USER_ROLES.ADMIN,
+  });
+  request.messages.push(
+    buildAdminMessage({
+      adminId: adminUser.id,
+      adminName: 'Admin Team',
+      actionType: invoiceNeedsCustomerProof(request.invoice)
+        ? REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPLOAD_PAYMENT_PROOF
+        : null,
+      text: buildInvoiceRequestMessage(request.invoice),
+    }),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'AdminCreateRequestInvoice',
+    intent: 'Confirm the invoice was attached to the request and sent to the customer thread',
+  });
+
+  return {
+    message: 'Invoice sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function reviewPaymentProof(adminUser, requestId, decision, reviewNote, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'AdminReviewPaymentProof',
+    intent: 'Approve or reject a customer payment proof from the admin workspace',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'AdminReviewPaymentProof',
+    intent: 'Load the request invoice before applying the payment-proof review decision',
+  });
+
+  const request = await loadAdminVisibleRequest(requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Service request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_REVIEW_PAYMENT_PROOF_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh the request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (!request.invoice) {
+    throw new AppError({
+      message: 'No invoice exists on this request yet',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_REVIEW_PAYMENT_PROOF_INVOICE_MISSING',
+      resolutionHint: 'Send an invoice before reviewing payment proof',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (request.invoice.status !== PAYMENT_REQUEST_STATUSES.PROOF_SUBMITTED) {
+    throw new AppError({
+      message: 'There is no payment proof waiting for review on this request',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_REVIEW_PAYMENT_PROOF_STATUS_INVALID',
+      resolutionHint: 'Refresh the request and check the latest invoice status',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  applyInvoiceReview(request.invoice, {
+    decision,
+    actorUserId: adminUser.id,
+    actorRole: USER_ROLES.ADMIN,
+    reviewNote,
+  });
+  if (decision === 'approved' && request.status !== REQUEST_STATUSES.CLOSED) {
+    request.status = REQUEST_STATUSES.PENDING_START;
+  }
+  request.messages.push(
+    buildSystemMessage(buildProofReviewMessage(request.invoice, decision)),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'AdminReviewPaymentProof',
+    intent: 'Confirm the admin payment-proof review decision was saved',
+  });
+
+  return {
+    message: decision === 'approved'
+      ? 'Payment proof approved'
+      : 'Payment proof rejected',
+    request: serializeServiceRequest(request),
+  };
+}
+
 async function listStaff(logContext) {
   logInfo({
     ...logContext,
@@ -302,6 +482,9 @@ async function listStaff(logContext) {
             REQUEST_STATUSES.UNDER_REVIEW,
             REQUEST_STATUSES.QUOTED,
             REQUEST_STATUSES.APPOINTMENT_CONFIRMED,
+            REQUEST_STATUSES.PENDING_START,
+            REQUEST_STATUSES.PROJECT_STARTED,
+            REQUEST_STATUSES.WORK_DONE,
           ],
         },
       },
@@ -534,10 +717,12 @@ async function listStaffInvites(logContext) {
 
 module.exports = {
   assignRequest,
+  createRequestInvoice,
   createStaffInvite,
   deleteStaffInvite,
   getDashboard,
   listRequests,
   listStaff,
   listStaffInvites,
+  reviewPaymentProof,
 };

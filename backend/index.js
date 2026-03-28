@@ -4,4 +4,4 @@
  * HOW: Re-export the server bootstrap module without duplicating runtime logic.
  */
 
-module.exports = require('./server');
+module.exports = require("./server");

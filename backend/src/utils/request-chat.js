@@ -6,33 +6,74 @@
 
 const { REQUEST_MESSAGE_SENDERS } = require('../constants/app.constants');
 
-function buildBaseMessage({ senderType, senderId = null, senderName, text }) {
+function buildBaseMessage({
+  senderType,
+  senderId = null,
+  senderName,
+  text,
+  actionType = null,
+  attachment = null,
+}) {
   // WHY: Trim message text once here so every caller stores the same clean payload shape.
   return {
     senderType,
     senderId,
     senderName,
+    actionType,
     text: text.trim(),
+    attachment,
     createdAt: new Date(),
   };
 }
 
-function buildCustomerMessage({ customerId, customerName, text }) {
+function buildRequestMessageAttachment(file, relativeUrl) {
+  if (!file || !relativeUrl) {
+    return null;
+  }
+
+  return {
+    originalName: file.originalname || 'attachment',
+    storedName: file.filename || '',
+    mimeType: file.mimetype || 'application/octet-stream',
+    sizeBytes: file.size || 0,
+    relativeUrl,
+  };
+}
+
+function buildCustomerMessage({
+  customerId,
+  customerName,
+  text,
+  attachment = null,
+}) {
   // WHY: Customer messages should always carry the account owner id so later audit or threading work can trace authorship.
   return buildBaseMessage({
     senderType: REQUEST_MESSAGE_SENDERS.CUSTOMER,
     senderId: customerId,
     senderName: customerName,
     text,
+    attachment,
   });
 }
 
-function buildStaffMessage({ staffId, staffName, text }) {
+function buildStaffMessage({ staffId, staffName, text, actionType = null }) {
   // WHY: Staff replies need the responder identity so customers know exactly who joined the thread.
   return buildBaseMessage({
     senderType: REQUEST_MESSAGE_SENDERS.STAFF,
     senderId: staffId,
     senderName: staffName,
+    actionType,
+    text,
+  });
+}
+
+function buildAdminMessage({ adminId, adminName, text, actionType = null }) {
+  // WHY: Admin-authored workflow messages should still render like a human participant instead of a system note.
+  return buildBaseMessage({
+    senderType: REQUEST_MESSAGE_SENDERS.ADMIN,
+    senderId: adminId,
+    senderName: adminName,
+    actionType,
     text,
   });
 }
@@ -56,8 +97,10 @@ function buildAiMessage(text) {
 }
 
 module.exports = {
+  buildAdminMessage,
   buildAiMessage,
   buildCustomerMessage,
+  buildRequestMessageAttachment,
   buildStaffMessage,
   buildSystemMessage,
 };

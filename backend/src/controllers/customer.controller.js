@@ -66,8 +66,79 @@ const customerPostRequestMessageController = asyncHandler(async (req, res) => {
   });
 });
 
+const customerUpdateRequestController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'CustomerUpdateRequest',
+    intent: 'Update an owned customer service request from the chat-driven follow-up flow',
+  });
+
+  const result = await customerService.updateRequest(
+    req.authUser.id,
+    req.params.requestId,
+    req.body,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const customerUploadPaymentProofController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'CustomerUploadPaymentProof',
+    intent: 'Upload customer payment proof for an invoice attached to an owned request',
+  });
+
+  const result = await customerService.uploadPaymentProof(
+    req.authUser.id,
+    req.params.requestId,
+    req.file,
+    req.body.note,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const customerUploadRequestAttachmentController = asyncHandler(
+  async (req, res) => {
+    const logContext = buildRequestLog(req, {
+      layer: 'controller',
+      operation: 'CustomerUploadRequestAttachment',
+      intent:
+          'Upload a customer chat attachment into an owned service-request thread',
+    });
+
+    const result = await customerService.uploadRequestAttachment(
+      req.authUser.id,
+      req.params.requestId,
+      req.file,
+      req.body.caption,
+      logContext,
+    );
+    res.status(200).json(result);
+
+    logInfo({
+      ...logContext,
+      step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+    });
+  },
+);
+
 module.exports = {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerUploadPaymentProofController,
+  customerUploadRequestAttachmentController,
+  customerUpdateRequestController,
 };
