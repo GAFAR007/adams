@@ -1,0 +1,13 @@
+.DS_Store
+.idea/
+.vscode/
+
+# Backend
+backend/.env
+backend/node_modules/
+npm-debug.log*
+
+# Flutter / Dart build output
+frontend/.dart_tool/
+frontend/build/
+frontend/.flutter-plugins-dependencies
