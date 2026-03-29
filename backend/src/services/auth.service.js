@@ -516,36 +516,31 @@ async function getDemoAccounts(
       "Confirm the role-specific users are ready for quick-fill response shaping",
   });
 
-  // WHY: Only expose accounts that have a known safe quick-fill password in this environment so the UI never advertises unusable shortcuts.
-  const accounts = users
-    .map((user) => {
-      const quickFillPassword =
-        resolveDemoPassword(
-          role,
-          user.email,
-        );
+  const isProduction =
+    process.env.NODE_ENV ===
+    "production";
 
-      if (!quickFillPassword) {
-        return null;
-      }
-
-      return {
+  // WHY: Keep the public demo-account endpoint safe in production, but expose every active local/dev account so the login shortcuts stay in sync with the database.
+  const accounts = isProduction
+    ? []
+    : users.map((user) => ({
         id: String(user._id),
         fullName:
           `${user.firstName} ${user.lastName}`.trim(),
         email: user.email,
-        quickFillPassword,
-      };
-    })
-    .filter(Boolean);
+        quickFillPassword:
+          resolveDemoPassword(
+            role,
+            user.email,
+          ),
+      }));
 
   return {
     message:
       "Demo accounts fetched successfully",
     role,
     passwordAutofillEnabled:
-      process.env.NODE_ENV !==
-      "production",
+      !isProduction,
     accounts,
   };
 }

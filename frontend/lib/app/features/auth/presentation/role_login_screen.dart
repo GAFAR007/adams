@@ -57,11 +57,9 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   }
 
   void _applyQuickFillAccount(DemoLoginAccount account) {
-    // WHY: Keep quick-fill behavior explicit and local so tapping an account always hydrates both credentials together.
+    // WHY: Keep quick-fill behavior explicit and local so tapping an account always hydrates the email and never leaves a stale password from another account.
     _emailController.text = account.email;
-    if (account.quickFillPassword != null) {
-      _passwordController.text = account.quickFillPassword!;
-    }
+    _passwordController.text = account.quickFillPassword ?? '';
     setState(() {});
   }
 
@@ -123,6 +121,16 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
               ),
               const SizedBox(height: 4),
               Text(account.email, style: Theme.of(context).textTheme.bodySmall),
+              if (account.quickFillPassword == null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  'Enter password manually',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.clay,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -143,6 +151,13 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
         padding: const EdgeInsets.all(18),
         child: demoAccountsAsync.when(
           data: (bundle) {
+            final hasQuickFillPasswords = bundle.accounts.any(
+              (account) => account.quickFillPassword != null,
+            );
+            final requiresManualPasswords = bundle.accounts.any(
+              (account) => account.quickFillPassword == null,
+            );
+
             if (bundle.accounts.isEmpty) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,7 +168,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'No seeded quick-fill accounts are available for this role right now.',
+                    'No backend accounts are available for this role right now.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ],
@@ -169,9 +184,11 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  bundle.passwordAutofillEnabled
-                      ? 'Tap a backend account to autofill email and password in this environment.'
-                      : 'Backend accounts are listed here, but password autofill is disabled in this environment.',
+                  !bundle.passwordAutofillEnabled || !hasQuickFillPasswords
+                      ? 'Tap a backend account to autofill the email, then enter that account password manually.'
+                      : requiresManualPasswords
+                      ? 'Tap any backend account to autofill the email. Seeded demo accounts also autofill their password in this environment.'
+                      : 'Tap a backend account to autofill email and password in this environment.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 14),

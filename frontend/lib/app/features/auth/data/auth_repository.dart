@@ -14,11 +14,11 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(ref.read(apiClientProvider));
 });
 
-final authDemoAccountsProvider = FutureProvider.family<DemoLoginBundle, String>(
-  (ref, role) async {
-    return ref.watch(authRepositoryProvider).fetchDemoAccounts(role: role);
-  },
-);
+final authDemoAccountsProvider = FutureProvider.autoDispose
+    .family<DemoLoginBundle, String>((ref, role) async {
+      // WHY: Login shortcuts can change after new registrations, so the list should refetch when the screen is reopened.
+      return ref.watch(authRepositoryProvider).fetchDemoAccounts(role: role);
+    });
 
 class AuthRepository {
   const AuthRepository(this._client);
