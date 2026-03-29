@@ -6,8 +6,12 @@
 backend/.env
 backend/node_modules/
 npm-debug.log*
+backend/agent.md
+backend/seeded-users.md
+backend/uploads/
 
 # Flutter / Dart build output
 frontend/.dart_tool/
 frontend/build/
 frontend/.flutter-plugins-dependencies
+frontend/agent.md
