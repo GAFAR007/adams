@@ -15,6 +15,7 @@ const {
   staffReviewPaymentProofController,
   staffRegisterController,
   staffUpdateAvailabilityController,
+  staffUpdateRequestAiControlController,
   staffUpdateRequestStatusController,
 } = require("../controllers/staff.controller");
 const {
@@ -45,6 +46,7 @@ const {
   staffRegisterValidator,
   staffRequestFiltersValidator,
   staffUpdateAvailabilityValidator,
+  staffUpdateRequestAiControlValidator,
   staffUpdateRequestStatusValidator,
 } = require("../validators/staff.validators");
 const {
@@ -105,6 +107,12 @@ function createStaffRouter() {
     staffPostRequestMessageValidator,
     validateRequest,
     staffPostRequestMessageController,
+  );
+  router.patch(
+    "/requests/:requestId/ai-control",
+    staffUpdateRequestAiControlValidator,
+    validateRequest,
+    staffUpdateRequestAiControlController,
   );
   router.post(
     "/requests/:requestId/invoice",

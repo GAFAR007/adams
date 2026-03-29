@@ -50,6 +50,20 @@ const env = Object.freeze({
   seedAdminPassword: process.env.SEED_ADMIN_PASSWORD || 'AdminPass123!',
   seedStaffPassword: process.env.SEED_STAFF_PASSWORD || 'StaffPass123!',
   seedCustomerPassword: process.env.SEED_CUSTOMER_PASSWORD || 'CustomerPass123!',
+  aiProvider: process.env.AI_PROVIDER || 'groq',
+  aiApiKey: process.env.AI_API_KEY || process.env.XAI_API_KEY || '',
+  aiBaseUrl: process.env.AI_BASE_URL || 'https://api.groq.com/openai/v1',
+  aiModelDefault:
+    process.env.AI_MODEL_DEFAULT || 'llama-3.1-8b-instant',
+  aiModelReasoning:
+    process.env.AI_MODEL_REASONING || 'llama-3.1-70b-versatile',
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+  stripeSuccessUrl:
+    process.env.STRIPE_SUCCESS_URL ||
+    `${process.env.FRONTEND_APP_URL || 'http://localhost:5173'}/#/app/requests`,
+  stripeCancelUrl:
+    process.env.STRIPE_CANCEL_URL ||
+    `${process.env.FRONTEND_APP_URL || 'http://localhost:5173'}/#/app/requests`,
 });
 
 module.exports = { env };

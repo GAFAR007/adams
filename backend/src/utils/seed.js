@@ -1,7 +1,7 @@
 /**
- * WHAT: Seeds MongoDB with one admin, sample staff, sample customers, and sample service requests.
- * WHY: The first frontend and dashboard flows need predictable data for immediate testing.
- * HOW: Reset the small v1 collections, hash seed passwords from env, and create linked demo records.
+ * WHAT: Seeds MongoDB with the public company profile, one admin, sample staff, sample customers, and sample service requests.
+ * WHY: The first frontend, homepage, and dashboard flows need predictable data for immediate testing.
+ * HOW: Reset the small v1 collections, seed the company profile, hash seed passwords from env, and create linked demo records.
  */
 
 const bcrypt = require("bcryptjs");
@@ -20,6 +20,9 @@ const {
   USER_ROLES,
   USER_STATUSES,
 } = require("../constants/app.constants");
+const {
+  CompanyProfile,
+} = require("../models/company-profile.model");
 const {
   RefreshSession,
 } = require("../models/refresh-session.model");
@@ -42,6 +45,9 @@ const {
   buildStaffMessage,
   buildSystemMessage,
 } = require("./request-chat");
+const {
+  buildQueueCreatedAiText,
+} = require("./request-queue-ai");
 
 async function runSeed() {
   // WHY: Reuse the normal database bootstrap so seeding fails fast if the configured MongoDB is unavailable.
@@ -61,11 +67,181 @@ async function runSeed() {
 
   // WHY: Reset only the small v1 collections so the seeded relationships stay consistent for development.
   await Promise.all([
+    CompanyProfile.deleteMany({}),
     RefreshSession.deleteMany({}),
     ServiceRequest.deleteMany({}),
     StaffInvite.deleteMany({}),
     User.deleteMany({}),
   ]);
+
+  await CompanyProfile.create({
+    siteKey: "default",
+    companyName: "CL Facility Management",
+    legalName: "CL Logistic and Facility Management UG",
+    category: {
+      en: "Cleaning service",
+      de: "Reinigungsservice",
+    },
+    tagline: {
+      en: "Move, clean and fix.",
+      de: "Umzug, Reinigung und Instandhaltung.",
+    },
+    heroTitle: {
+      en: "Cleaning and facility support for homes, offices, and properties in Mönchengladbach.",
+      de: "Reinigungs- und Facility-Service für Wohnungen, Büros und Objekte in Mönchengladbach.",
+    },
+    heroSubtitle: {
+      en: "CL Logistic and Facility Management UG provides direct local support, fast contact, and structured service requests from one place.",
+      de: "CL Logistic and Facility Management UG bietet direkten lokalen Support, schnellen Kontakt und strukturierte Serviceanfragen an einem Ort.",
+    },
+    adminLoginLabel: {
+      en: "Admin Login",
+      de: "Admin-Anmeldung",
+    },
+    createAccountLabel: {
+      en: "Book a service",
+      de: "Service buchen",
+    },
+    customerLoginLabel: {
+      en: "Customer Login",
+      de: "Kunden-Login",
+    },
+    staffLoginLabel: {
+      en: "Staff Login",
+      de: "Mitarbeiter-Login",
+    },
+    heroPanelTitle: {
+      en: "Company snapshot",
+      de: "Unternehmensprofil",
+    },
+    heroPanelSubtitle: {
+      en: "Public details seeded from the business information you shared.",
+      de: "Öffentliche Angaben, die aus den von dir geteilten Unternehmensdaten befüllt wurden.",
+    },
+    heroBullets: [
+      {
+        en: "Cleaning service based at Kunkel Str. 44, 41063 Mönchengladbach, Germany",
+        de: "Reinigungsservice mit Sitz in der Kunkel Str. 44, 41063 Mönchengladbach, Deutschland",
+      },
+      {
+        en: "Direct contact by phone and email for incoming requests",
+        de: "Direkter Kontakt per Telefon und E-Mail für neue Anfragen",
+      },
+      {
+        en: "Always open for enquiries according to the shared business profile",
+        de: "Laut dem geteilten Unternehmensprofil jederzeit für Anfragen erreichbar",
+      },
+      {
+        en: "Facility support for house, office, window, and building cleaning",
+        de: "Facility-Support für Haus-, Büro-, Fenster- und Gebäudereinigung",
+      },
+    ],
+    servicesTitle: {
+      en: "Services",
+      de: "Leistungen",
+    },
+    serviceCardSubtitle: {
+      en: "Tell the team what needs attention and they can review it through the request queue.",
+      de: "Beschreibe dem Team, was erledigt werden muss, und die Anfrage wird über die Queue geprüft.",
+    },
+    serviceLabels: [
+      {
+        key: "building_cleaning",
+        label: {
+          en: "Building Cleaning",
+          de: "Gebäudereinigung",
+        },
+      },
+      {
+        key: "window_cleaning",
+        label: {
+          en: "Window Cleaning",
+          de: "Fensterreinigung",
+        },
+      },
+      {
+        key: "office_cleaning",
+        label: {
+          en: "Office Cleaning",
+          de: "Büroreinigung",
+        },
+      },
+      {
+        key: "house_cleaning",
+        label: {
+          en: "House Cleaning",
+          de: "Hausreinigung",
+        },
+      },
+    ],
+    howItWorksTitle: {
+      en: "How it works",
+      de: "So funktioniert es",
+    },
+    howItWorksSteps: [
+      {
+        title: {
+          en: "1. Send your request",
+          de: "1. Anfrage senden",
+        },
+        subtitle: {
+          en: "Customers can send a structured request with service type, address, timing, and job notes.",
+          de: "Kunden senden eine strukturierte Anfrage mit Leistungsart, Adresse, Zeitpunkt und Notizen zum Auftrag.",
+        },
+      },
+      {
+        title: {
+          en: "2. Review and clarify",
+          de: "2. Prüfen und abstimmen",
+        },
+        subtitle: {
+          en: "Admin and staff can review the request, ask follow-up questions, and confirm the next step.",
+          de: "Admin und Mitarbeitende prüfen die Anfrage, stellen Rückfragen und bestätigen den nächsten Schritt.",
+        },
+      },
+      {
+        title: {
+          en: "3. Complete the work",
+          de: "3. Arbeit abschließen",
+        },
+        subtitle: {
+          en: "The assigned team member can move the request through quote, confirmation, start, and completion.",
+          de: "Das zugewiesene Teammitglied führt die Anfrage durch Angebot, Bestätigung, Start und Abschluss.",
+        },
+      },
+    ],
+    contactSectionTitle: {
+      en: "Contact and business info",
+      de: "Kontakt- und Unternehmensdaten",
+    },
+    contactSectionSubtitle: {
+      en: "These details come from the shared company profile so the homepage stays backend-driven.",
+      de: "Diese Angaben kommen aus dem hinterlegten Unternehmensprofil, damit die Startseite backend-gesteuert bleibt.",
+    },
+    serviceAreaLabel: {
+      en: "Service area",
+      de: "Einsatzgebiet",
+    },
+    serviceAreaText: {
+      en: "Mönchengladbach, Germany",
+      de: "Mönchengladbach, Deutschland",
+    },
+    contact: {
+      addressLine1: "Kunkel Str. 44",
+      city: "Mönchengladbach",
+      postalCode: "41063",
+      country: "Germany",
+      phone: "+49 2166 6377345",
+      secondaryPhone: "",
+      email: "cl.facility.management@gmx.de",
+      hoursLabel: {
+        en: "Always open",
+        de: "Immer geöffnet",
+      },
+    },
+    primaryColorHex: "#1B4D8C",
+    accentColorHex: "#CE7B37",
+  });
 
   // WHY: Hash seed passwords once up front so every seeded user follows the real auth storage rules.
   const [
@@ -205,7 +381,19 @@ async function runSeed() {
           "Your request is now in the live queue. A staff member will attend to it here.",
         ),
         buildAiMessage(
-          "I captured your request details and will keep this conversation warm while you wait for staff.",
+          buildQueueCreatedAiText({
+            request: {
+              serviceType: SERVICE_TYPES[0],
+              preferredTimeWindow: "Morning",
+              location: {
+                city: "Monchengladbach",
+              },
+              messages: [],
+            },
+            companyProfile: {
+              companyName: "CL Facility Management",
+            },
+          }),
         ),
       ],
     },

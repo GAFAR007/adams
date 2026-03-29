@@ -12,28 +12,35 @@ const {
   REQUEST_MESSAGE_ACTIONS,
   REQUEST_SOURCES,
   REQUEST_STATUSES,
+  STAFF_AVAILABILITIES,
   USER_ROLES,
   USER_STATUSES,
 } = require('../constants/app.constants');
+const { CompanyProfile } = require('../models/company-profile.model');
 const { ServiceRequest } = require('../models/service-request.model');
 const { User } = require('../models/user.model');
 const { AppError } = require('../utils/app-error');
 const { logInfo } = require('../utils/logger');
 const {
+  buildQueueAttachmentAiText,
+  buildQueueCreatedAiText,
+  buildQueueDetailsUpdatedAiText,
+  buildQueueFollowUpAiText,
+} = require('../utils/request-queue-ai');
+const {
   buildAiMessage,
   buildCustomerMessage,
   buildRequestMessageAttachment,
-  buildSystemMessage,
 } = require('../utils/request-chat');
+const { attachProofToInvoice } = require('../utils/request-payment');
 const {
-  attachProofToInvoice,
-  buildProofUploadedMessage,
-} = require('../utils/request-payment');
+  syncOnlineInvoicePaymentIfNeeded,
+} = require('../utils/request-payment-status');
 const { serializeServiceRequest } = require('../utils/serializers');
 
-function buildWaitingAiText() {
-  // WHY: Keep the placeholder AI copy in one helper so queue-waiting guidance stays consistent across message flows.
-  return 'Thanks. I added your update to the queue and will keep this conversation warm while a staff member joins.';
+async function loadQueueCompanyProfile() {
+  // WHY: Queue-assistant copy should reuse the live company profile when it exists, but request handling must still work without it.
+  return CompanyProfile.findOne({ siteKey: 'default' }).lean();
 }
 
 async function loadActiveCustomer(customerUserId) {
@@ -47,12 +54,41 @@ async function loadActiveCustomer(customerUserId) {
 
 async function loadOwnedRequest(customerUserId, requestId) {
   // WHY: Scope request lookups by the signed-in customer id so customers can never post into someone else's thread.
-  return ServiceRequest.findOne({
+  const request = await ServiceRequest.findOne({
     _id: requestId,
     customer: customerUserId,
   })
     .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt');
+
+  if (request && await syncOnlineInvoicePaymentIfNeeded(request)) {
+    await request.save();
+  }
+
+  return request;
+}
+
+function shouldAssistantHandleCustomerThread(request) {
+  if (!request?.assignedStaff) {
+    return true;
+  }
+
+  return (
+    Boolean(request.aiControlEnabled) ||
+    request.assignedStaff.staffAvailability !== STAFF_AVAILABILITIES.ONLINE
+  );
+}
+
+function buildCustomerThreadResponseMessage(request, itemLabel) {
+  if (!request?.assignedStaff) {
+    return `${itemLabel} added to the queue`;
+  }
+
+  if (shouldAssistantHandleCustomerThread(request)) {
+    return `${itemLabel} added while Naima covers the chat`;
+  }
+
+  return `${itemLabel} sent to the assigned staff thread`;
 }
 
 async function createRequest(customerUserId, payload, logContext) {
@@ -87,6 +123,7 @@ async function createRequest(customerUserId, payload, logContext) {
   }
 
   const detailsUpdatedAt = new Date();
+  const companyProfile = await loadQueueCompanyProfile();
   // WHY: Seed the thread immediately so the customer lands in a queue with visible conversation context instead of silence.
   const request = await ServiceRequest.create({
     customer: customer._id,
@@ -115,7 +152,19 @@ async function createRequest(customerUserId, payload, logContext) {
         text: payload.message,
       }),
       buildSystemMessage('Your request is now in the live queue. A staff member will attend to it here.'),
-      buildAiMessage('I captured your request details and will keep you company here while you wait for staff.'),
+      buildAiMessage(
+        buildQueueCreatedAiText({
+          request: {
+            serviceType: payload.serviceType,
+            preferredTimeWindow: payload.preferredTimeWindow || '',
+            location: {
+              city: payload.city,
+            },
+            messages: [],
+          },
+          companyProfile,
+        }),
+      ),
     ],
   });
 
@@ -159,6 +208,14 @@ async function listRequests(customerUserId, logContext) {
     .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .sort({ createdAt: -1 });
+
+  await Promise.all(
+    requests.map(async (request) => {
+      if (await syncOnlineInvoicePaymentIfNeeded(request)) {
+        await request.save();
+      }
+    }),
+  );
 
   logInfo({
     ...logContext,
@@ -214,8 +271,17 @@ async function postRequestMessage(customerUserId, requestId, text, logContext) {
   );
 
   // WHY: While no staff member is attached, a lightweight AI placeholder should reassure the customer that the queue is still active.
-  if (!request.assignedStaff) {
-    request.messages.push(buildAiMessage(buildWaitingAiText()));
+  if (shouldAssistantHandleCustomerThread(request)) {
+    const companyProfile = await loadQueueCompanyProfile();
+    request.messages.push(
+      buildAiMessage(
+        buildQueueFollowUpAiText({
+          request,
+          companyProfile,
+          customerText: text,
+        }),
+      ),
+    );
   }
 
   await request.save();
@@ -229,9 +295,7 @@ async function postRequestMessage(customerUserId, requestId, text, logContext) {
   });
 
   return {
-    message: request.assignedStaff
-      ? 'Message sent to the assigned staff thread'
-      : 'Message added to the queue while you wait for staff',
+    message: buildCustomerThreadResponseMessage(request, 'Message'),
     request: serializeServiceRequest(request),
   };
 }
@@ -295,10 +359,14 @@ async function updateRequest(customerUserId, requestId, payload, logContext) {
   const shouldClearPendingUpdateAction =
     lastMessage?.actionType === REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPDATE_REQUEST;
 
-  if (!request.assignedStaff && shouldClearPendingUpdateAction) {
+  if (shouldAssistantHandleCustomerThread(request) && shouldClearPendingUpdateAction) {
+    const companyProfile = await loadQueueCompanyProfile();
     request.messages.push(
       buildAiMessage(
-        'Your request details were updated successfully. I kept the queue thread aligned with the latest information.',
+        buildQueueDetailsUpdatedAiText({
+          request,
+          companyProfile,
+        }),
       ),
     );
   }
@@ -408,7 +476,22 @@ async function uploadPaymentProof(customerUserId, requestId, file, note, logCont
   }
 
   attachProofToInvoice(request.invoice, file, note);
-  request.messages.push(buildSystemMessage(buildProofUploadedMessage(request.invoice)));
+  const proofAttachment = buildRequestMessageAttachment(
+    file,
+    request.invoice.proof?.relativeUrl,
+  );
+  const trimmedNote = typeof note === 'string' ? note.trim() : '';
+  request.messages.push(
+    buildCustomerMessage({
+      customerId: customerUserId,
+      customerName: request.contactSnapshot.fullName,
+      actionType: REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPLOAD_PAYMENT_PROOF,
+      text: trimmedNote.isEmpty
+          ? `Uploaded payment proof for quotation ${request.invoice.invoiceNumber}.`
+          : `Uploaded payment proof for quotation ${request.invoice.invoiceNumber}. Note: ${trimmedNote}`,
+      attachment: proofAttachment,
+    }),
+  );
   await request.save();
 
   logInfo({
@@ -497,6 +580,19 @@ async function uploadRequestAttachment(
     }),
   );
 
+  if (shouldAssistantHandleCustomerThread(request)) {
+    const companyProfile = await loadQueueCompanyProfile();
+    request.messages.push(
+      buildAiMessage(
+        buildQueueAttachmentAiText({
+          request,
+          companyProfile,
+          attachmentName: file.originalname,
+        }),
+      ),
+    );
+  }
+
   await request.save();
 
   logInfo({
@@ -508,9 +604,7 @@ async function uploadRequestAttachment(
   });
 
   return {
-    message: request.assignedStaff
-      ? 'Attachment sent to the assigned staff thread'
-      : 'Attachment added to the queue while you wait for staff',
+    message: buildCustomerThreadResponseMessage(request, 'Attachment'),
     request: serializeServiceRequest(request),
   };
 }

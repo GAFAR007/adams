@@ -27,8 +27,8 @@ class CustomerLoginScreen extends StatelessWidget {
       footer: Align(
         alignment: Alignment.centerLeft,
         child: TextButton(
-          onPressed: () => context.go('/register'),
-          child: const Text('Need an account? Register here'),
+          onPressed: () => context.go('/book-service'),
+          child: const Text('Need a first booking? Start service chat'),
         ),
       ),
     );

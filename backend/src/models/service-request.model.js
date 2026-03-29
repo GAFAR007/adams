@@ -214,6 +214,49 @@ const requestInvoiceSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    paymentProvider: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    paymentLinkUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    providerPaymentId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    paymentReference: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+    providerReceiptUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    receiptNumber: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    receiptRelativeUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    receiptIssuedAt: {
+      type: Date,
+      default: null,
+    },
     proof: {
       type: paymentProofSchema,
       default: null,
@@ -314,6 +357,11 @@ const serviceRequestSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
       index: true,
+    },
+    aiControlEnabled: {
+      // WHY: Staff can hand the thread back to Naima temporarily without dropping the direct staff assignment.
+      type: Boolean,
+      default: false,
     },
     queueEnteredAt: {
       // WHY: Queue views and queue-clearing metrics need the original waiting timestamp preserved independently of updates.

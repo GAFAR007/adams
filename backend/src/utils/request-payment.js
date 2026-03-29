@@ -16,7 +16,7 @@ function buildInvoiceNumber(requestId) {
   const day = now.getDate().toString().padStart(2, '0');
   const suffix = String(requestId || '').slice(-6).toUpperCase() || 'REQUEST';
   const serial = Math.floor(100 + Math.random() * 900);
-  return `INV-${year}${month}${day}-${suffix}-${serial}`;
+  return `QTE-${year}${month}${day}-${suffix}-${serial}`;
 }
 
 function formatEuroAmount(amount) {
@@ -38,6 +38,8 @@ function formatDate(value) {
 function paymentMethodLabel(paymentMethod) {
   return paymentMethod === PAYMENT_METHODS.CASH_ON_COMPLETION
     ? 'Cash on completion'
+    : paymentMethod === PAYMENT_METHODS.STRIPE_CHECKOUT
+    ? 'Online card / wallet payment'
     : 'SEPA bank transfer';
 }
 
@@ -47,6 +49,14 @@ function invoiceNeedsCustomerProof(invoice) {
   }
 
   return invoice.paymentMethod === PAYMENT_METHODS.SEPA_BANK_TRANSFER;
+}
+
+function invoiceNeedsOnlinePayment(invoice) {
+  if (!invoice) {
+    return false;
+  }
+
+  return invoice.paymentMethod === PAYMENT_METHODS.STRIPE_CHECKOUT;
 }
 
 function createInvoiceRecord({
@@ -77,13 +87,22 @@ function createInvoiceRecord({
     reviewedByRole: null,
     reviewedById: null,
     reviewNote: '',
+    paymentProvider: null,
+    paymentLinkUrl: null,
+    providerPaymentId: null,
+    paymentReference: null,
+    paidAt: null,
+    providerReceiptUrl: null,
+    receiptNumber: null,
+    receiptRelativeUrl: null,
+    receiptIssuedAt: null,
     proof: null,
   };
 }
 
 function buildInvoiceRequestMessage(invoice) {
   const segments = [
-    `Invoice ${invoice.invoiceNumber} for EUR ${formatEuroAmount(invoice.amount)} is ready.`,
+    `Quotation ${invoice.invoiceNumber} for EUR ${formatEuroAmount(invoice.amount)} is ready.`,
     `Payment option: ${paymentMethodLabel(invoice.paymentMethod)}.`,
   ];
 
@@ -97,6 +116,12 @@ function buildInvoiceRequestMessage(invoice) {
 
   if (invoice.paymentInstructions) {
     segments.push(`Payment details: ${invoice.paymentInstructions}`);
+  }
+
+  if (invoiceNeedsOnlinePayment(invoice) && invoice.paymentLinkUrl) {
+    segments.push(
+      'Use the online payment button on the payment card to complete checkout securely and receive your receipt.',
+    );
   }
 
   if (invoiceNeedsCustomerProof(invoice)) {
@@ -126,7 +151,7 @@ function attachProofToInvoice(invoice, file, note = '') {
 }
 
 function buildProofUploadedMessage(invoice) {
-  return `Payment proof uploaded for invoice ${invoice.invoiceNumber}. Staff can review it now.`;
+  return `Payment proof uploaded for quotation ${invoice.invoiceNumber}. Staff can review it now.`;
 }
 
 function applyInvoiceReview(invoice, { decision, actorUserId, actorRole, reviewNote }) {
@@ -139,24 +164,34 @@ function applyInvoiceReview(invoice, { decision, actorUserId, actorRole, reviewN
   invoice.reviewNote = (reviewNote || '').trim();
 }
 
+function buildReceiptIssuedMessage(invoice) {
+  if (!invoice?.receiptNumber) {
+    return `Payment accepted for quotation ${invoice.invoiceNumber}.`;
+  }
+
+  return `Payment accepted for quotation ${invoice.invoiceNumber}. Receipt ${invoice.receiptNumber} is ready.`;
+}
+
 function buildProofReviewMessage(invoice, decision) {
   if (decision === 'approved') {
-    return `Payment proof approved for invoice ${invoice.invoiceNumber}. The request is now pending start.`;
+    return `Payment proof approved for quotation ${invoice.invoiceNumber}. The request is now pending start.`;
   }
 
   const reason = invoice.reviewNote
     ? ` Reason: ${invoice.reviewNote}`
     : '';
-  return `Payment proof was rejected for invoice ${invoice.invoiceNumber}. Please upload a new proof.${reason}`;
+  return `Payment proof was rejected for quotation ${invoice.invoiceNumber}. Please upload a new proof.${reason}`;
 }
 
 module.exports = {
   applyInvoiceReview,
   attachProofToInvoice,
   buildInvoiceRequestMessage,
+  buildReceiptIssuedMessage,
   buildProofReviewMessage,
   buildProofUploadedMessage,
   createInvoiceRecord,
   invoiceNeedsCustomerProof,
+  invoiceNeedsOnlinePayment,
   paymentMethodLabel,
 };

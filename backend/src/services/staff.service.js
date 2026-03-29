@@ -16,15 +16,21 @@ const {
   USER_ROLES,
   USER_STATUSES,
 } = require('../constants/app.constants');
+const { CompanyProfile } = require('../models/company-profile.model');
 const { ServiceRequest } = require('../models/service-request.model');
 const { StaffInvite } = require('../models/staff-invite.model');
 const { User } = require('../models/user.model');
 const { AppError } = require('../utils/app-error');
 const { logInfo } = require('../utils/logger');
 const {
+  createHostedPaymentSession,
+} = require('../utils/payment-provider');
+const {
+  buildAiMessage,
   buildStaffMessage,
   buildSystemMessage,
 } = require('../utils/request-chat');
+const { buildAiControlEnabledText } = require('../utils/request-queue-ai');
 const {
   applyInvoiceReview,
   buildInvoiceRequestMessage,
@@ -32,6 +38,10 @@ const {
   createInvoiceRecord,
   invoiceNeedsCustomerProof,
 } = require('../utils/request-payment');
+const {
+  finalizeApprovedInvoice,
+  syncOnlineInvoicePaymentIfNeeded,
+} = require('../utils/request-payment-status');
 const { serializeServiceRequest, serializeUser } = require('../utils/serializers');
 const { issueSessionTokens, verifyStaffInviteToken } = require('./token.service');
 
@@ -61,6 +71,10 @@ function startOfToday() {
   return date;
 }
 
+async function loadQueueCompanyProfile() {
+  return CompanyProfile.findOne({ siteKey: 'default' }).lean();
+}
+
 async function loadActiveStaffUser(staffUserId) {
   // WHY: Staff-only actions should always resolve identity from MongoDB so queue and reply permissions stay trustworthy.
   return User.findOne({
@@ -72,12 +86,28 @@ async function loadActiveStaffUser(staffUserId) {
 
 async function loadAssignedRequest(requestId, staffUserId) {
   // WHY: Assignment ownership is enforced at the query layer so staff can never update another teammate's request.
-  return ServiceRequest.findOne({
+  const request = await ServiceRequest.findOne({
     _id: requestId,
     assignedStaff: staffUserId,
   })
     .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt');
+
+  if (request && await syncOnlineInvoicePaymentIfNeeded(request)) {
+    await request.save();
+  }
+
+  return request;
+}
+
+async function syncRequestCollectionInvoices(requests) {
+  await Promise.all(
+    requests.map(async (request) => {
+      if (await syncOnlineInvoicePaymentIfNeeded(request)) {
+        await request.save();
+      }
+    }),
+  );
 }
 
 async function registerFromInvite(payload, meta, logContext) {
@@ -250,6 +280,9 @@ async function getDashboard(staffUserId, logContext) {
     });
   }
 
+  await syncRequestCollectionInvoices(queueRequests);
+  await syncRequestCollectionInvoices(recentRequests);
+
   logInfo({
     ...logContext,
     step: LOG_STEPS.DB_QUERY_OK,
@@ -302,6 +335,8 @@ async function listAssignedRequests(staffUserId, filters, logContext) {
     .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .sort({ updatedAt: -1, createdAt: -1 });
+
+  await syncRequestCollectionInvoices(requests);
 
   logInfo({
     ...logContext,
@@ -553,6 +588,7 @@ async function postAssignedRequestMessage(
 
   // WHY: A staff reply means the request is actively being worked, so keep the first-attended marker filled in.
   request.attendedAt = request.attendedAt || new Date();
+  request.aiControlEnabled = false;
   await request.save();
 
   logInfo({
@@ -565,6 +601,112 @@ async function postAssignedRequestMessage(
 
   return {
     message: 'Reply sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function updateAssignedRequestAiControl(
+  staffUserId,
+  requestId,
+  enabled,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'StaffUpdateRequestAiControl',
+    intent: 'Let assigned staff hand the chat to Naima temporarily without losing ownership of the request',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'StaffUpdateRequestAiControl',
+    intent: 'Load the staff account and assigned request before changing who is covering the live chat',
+  });
+
+  const [staff, request] = await Promise.all([
+    loadActiveStaffUser(staffUserId),
+    loadAssignedRequest(requestId, staffUserId),
+  ]);
+
+  if (!staff) {
+    throw new AppError({
+      message: 'Staff account not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_AI_CONTROL_USER_NOT_FOUND',
+      resolutionHint: 'Log in again and try once more',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (!request) {
+    throw new AppError({
+      message: 'Assigned request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_AI_CONTROL_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your dashboard and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot change AI coverage',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_AI_CONTROL_REQUEST_CLOSED',
+      resolutionHint: 'Open another active request thread instead',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  const staffName = `${staff.firstName} ${staff.lastName}`.trim();
+  request.aiControlEnabled = enabled;
+
+  if (enabled) {
+    const companyProfile = await loadQueueCompanyProfile();
+    request.messages.push(
+      buildSystemMessage(`${staffName} handed the chat back to Naima for interim cover.`),
+    );
+    request.messages.push(
+      buildAiMessage(
+        buildAiControlEnabledText({
+          request,
+          companyProfile,
+        }),
+      ),
+    );
+  } else {
+    request.messages.push(
+      buildSystemMessage(
+        staff.staffAvailability === STAFF_AVAILABILITIES.ONLINE
+          ? `${staffName} resumed direct chat control here.`
+          : `${staffName} cleared the manual Naima cover. Naima will still stay active while staff is offline.`,
+      ),
+    );
+  }
+
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'StaffUpdateRequestAiControl',
+    intent: 'Confirm the Naima handoff state was saved on the assigned request',
+  });
+
+  return {
+    message: enabled
+      ? 'Naima is now covering this chat'
+      : staff.staffAvailability === STAFF_AVAILABILITIES.ONLINE
+      ? 'Direct staff chat resumed'
+      : 'Manual Naima cover cleared, but Naima stays active while staff is offline',
     request: serializeServiceRequest(request),
   };
 }
@@ -634,6 +776,15 @@ async function createAssignedRequestInvoice(staffUserId, requestId, payload, log
     actorUserId: staffUserId,
     actorRole: USER_ROLES.STAFF,
   });
+  const hostedPaymentSession = await createHostedPaymentSession({
+    invoice: request.invoice,
+    request,
+  });
+  if (hostedPaymentSession) {
+    request.invoice.paymentProvider = hostedPaymentSession.paymentProvider;
+    request.invoice.paymentLinkUrl = hostedPaymentSession.paymentLinkUrl;
+    request.invoice.providerPaymentId = hostedPaymentSession.providerPaymentId;
+  }
   request.messages.push(
     buildStaffMessage({
       staffId: staffUserId,
@@ -725,12 +876,12 @@ async function reviewAssignedRequestPaymentProof(
     actorRole: USER_ROLES.STAFF,
     reviewNote,
   });
-  if (decision === 'approved' && request.status !== REQUEST_STATUSES.CLOSED) {
-    request.status = REQUEST_STATUSES.PENDING_START;
-  }
   request.messages.push(
     buildSystemMessage(buildProofReviewMessage(request.invoice, decision)),
   );
+  if (decision === 'approved') {
+    await finalizeApprovedInvoice(request);
+  }
   await request.save();
 
   logInfo({
@@ -830,6 +981,7 @@ module.exports = {
   postAssignedRequestMessage,
   registerFromInvite,
   reviewAssignedRequestPaymentProof,
+  updateAssignedRequestAiControl,
   updateAssignedRequestStatus,
   updateAvailability,
 };

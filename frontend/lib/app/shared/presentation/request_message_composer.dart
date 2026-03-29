@@ -31,8 +31,6 @@ class RequestMessageComposer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final canSubmit = isEnabled && !isSubmitting;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: dark
@@ -66,89 +64,127 @@ class RequestMessageComposer extends StatelessWidget {
               }),
             ],
             Expanded(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: dark
-                      ? Colors.white.withValues(alpha: canSubmit ? 0.98 : 0.7)
-                      : AppTheme.sand.withValues(
-                          alpha: canSubmit ? 0.76 : 0.52,
-                        ),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: dark
-                        ? Colors.white.withValues(alpha: 0.04)
-                        : AppTheme.clay.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 4,
-                  ),
-                  child: TextField(
-                    controller: controller,
-                    enabled: isEnabled && !isSubmitting,
-                    minLines: 1,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    textInputAction: TextInputAction.send,
-                    decoration: InputDecoration(
-                      isCollapsed: true,
-                      border: InputBorder.none,
-                      hintText: hintText,
-                      hintStyle: Theme.of(context).textTheme.bodyMedium
-                          ?.copyWith(
+              child: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: controller,
+                builder:
+                    (BuildContext context, TextEditingValue value, Widget? _) {
+                      final hasText = value.text.trim().isNotEmpty;
+                      final canSubmit = isEnabled && !isSubmitting && hasText;
+
+                      return DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: dark
+                              ? Colors.white.withValues(
+                                  alpha: canSubmit ? 0.98 : 0.7,
+                                )
+                              : AppTheme.sand.withValues(
+                                  alpha: canSubmit ? 0.76 : 0.52,
+                                ),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
                             color: dark
-                                ? Colors.black.withValues(alpha: 0.42)
-                                : AppTheme.ink.withValues(alpha: 0.46),
+                                ? Colors.white.withValues(alpha: 0.04)
+                                : AppTheme.clay.withValues(alpha: 0.3),
                           ),
-                      filled: false,
-                    ),
-                    style: TextStyle(color: dark ? Colors.black : AppTheme.ink),
-                    onSubmitted: (_) {
-                      // WHY: Keyboard submit should reuse the same guarded callback path as the button to keep behavior consistent.
-                      if (canSubmit) {
-                        onSubmit();
-                      }
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: TextField(
+                                  controller: controller,
+                                  enabled: isEnabled && !isSubmitting,
+                                  minLines: 1,
+                                  maxLines: 5,
+                                  textCapitalization:
+                                      TextCapitalization.sentences,
+                                  textInputAction: TextInputAction.send,
+                                  decoration: InputDecoration(
+                                    isCollapsed: true,
+                                    border: InputBorder.none,
+                                    hintText: hintText,
+                                    hintStyle: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: dark
+                                              ? Colors.black.withValues(
+                                                  alpha: 0.42,
+                                                )
+                                              : AppTheme.ink.withValues(
+                                                  alpha: 0.46,
+                                                ),
+                                        ),
+                                    filled: false,
+                                  ),
+                                  style: TextStyle(
+                                    color: dark ? Colors.black : AppTheme.ink,
+                                  ),
+                                  onSubmitted: (_) {
+                                    if (canSubmit) {
+                                      onSubmit();
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
                     },
-                  ),
-                ),
               ),
             ),
             const SizedBox(width: 10),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: <Color>[
-                    canSubmit
-                        ? AppTheme.cobalt
-                        : AppTheme.cobalt.withValues(alpha: 0.45),
-                    canSubmit
-                        ? AppTheme.cobalt.withValues(alpha: 0.82)
-                        : AppTheme.cobalt.withValues(alpha: 0.35),
-                  ],
-                ),
-                shape: BoxShape.circle,
-                boxShadow: canSubmit
-                    ? <BoxShadow>[
-                        BoxShadow(
-                          color: AppTheme.cobalt.withValues(alpha: 0.24),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder:
+                  (BuildContext context, TextEditingValue value, Widget? _) {
+                    final hasText = value.text.trim().isNotEmpty;
+                    final canSubmit = isEnabled && !isSubmitting && hasText;
+
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: <Color>[
+                            canSubmit
+                                ? AppTheme.cobalt
+                                : AppTheme.cobalt.withValues(alpha: 0.45),
+                            canSubmit
+                                ? AppTheme.cobalt.withValues(alpha: 0.82)
+                                : AppTheme.cobalt.withValues(alpha: 0.35),
+                          ],
                         ),
-                      ]
-                    : null,
-              ),
-              child: IconButton(
-                tooltip: buttonLabel,
-                onPressed: canSubmit ? onSubmit : null,
-                icon: Icon(
-                  isSubmitting ? Icons.more_horiz_rounded : Icons.send_rounded,
-                  color: Colors.white,
-                ),
-              ),
+                        shape: BoxShape.circle,
+                        boxShadow: canSubmit
+                            ? <BoxShadow>[
+                                BoxShadow(
+                                  color: AppTheme.cobalt.withValues(
+                                    alpha: 0.24,
+                                  ),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: IconButton(
+                        tooltip: buttonLabel,
+                        onPressed: canSubmit ? onSubmit : null,
+                        icon: Icon(
+                          isSubmitting
+                              ? Icons.more_horiz_rounded
+                              : Icons.send_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                    );
+                  },
             ),
           ],
         ),

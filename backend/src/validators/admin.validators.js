@@ -6,6 +6,7 @@
 
 const { body, param, query } = require('express-validator');
 const { PAYMENT_METHODS } = require('../constants/app.constants');
+const { optionalPhoneValidator } = require('./phone.validators');
 
 const adminRequestFiltersValidator = [
   query('status').optional().trim().isString().withMessage('Status filter must be a string'),
@@ -26,7 +27,7 @@ const adminCreateStaffInviteValidator = [
   body('firstName').trim().notEmpty().withMessage('First name is required'),
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
   body('email').trim().isEmail().withMessage('A valid email is required'),
-  body('phone').optional().trim().isLength({ min: 7 }).withMessage('Phone number must be at least 7 characters'),
+  optionalPhoneValidator,
 ];
 
 const adminCreateRequestInvoiceValidator = [

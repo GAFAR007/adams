@@ -57,6 +57,7 @@ function createStorage(directory) {
 function createUpload({
   directory,
   allowedMimeTypes,
+  allowedExtensions = null,
   invalidTypeMessage,
   invalidTypeErrorCode,
   invalidTypeResolutionHint,
@@ -68,7 +69,13 @@ function createUpload({
       fileSize: fileSizeBytes,
     },
     fileFilter: (_req, file, callback) => {
-      if (allowedMimeTypes.has(file.mimetype)) {
+      const normalizedMimeType = String(file.mimetype || '').toLowerCase();
+      const normalizedExtension = path.extname(file.originalname || '').toLowerCase();
+
+      if (
+        allowedMimeTypes.has(normalizedMimeType) ||
+        (allowedExtensions?.has(normalizedExtension) ?? false)
+      ) {
         callback(null, true);
         return;
       }
@@ -143,6 +150,7 @@ function buildUploadMiddleware({
 const paymentProofUpload = createUpload({
   directory: paymentProofDirectory,
   allowedMimeTypes: paymentProofMimeTypes,
+  allowedExtensions: new Set(['.pdf', '.jpg', '.jpeg', '.png']),
   invalidTypeMessage: 'Only PNG, JPG, or PDF payment proof files are allowed',
   invalidTypeErrorCode: 'PAYMENT_PROOF_FILE_TYPE_INVALID',
   invalidTypeResolutionHint: 'Upload a PNG, JPG, or PDF file and try again',
@@ -152,6 +160,16 @@ const paymentProofUpload = createUpload({
 const requestAttachmentUpload = createUpload({
   directory: requestAttachmentDirectory,
   allowedMimeTypes: requestAttachmentMimeTypes,
+  allowedExtensions: new Set([
+    '.doc',
+    '.docx',
+    '.jpg',
+    '.jpeg',
+    '.pdf',
+    '.png',
+    '.txt',
+    '.webp',
+  ]),
   invalidTypeMessage:
     'Only PNG, JPG, WEBP, PDF, TXT, DOC, or DOCX chat attachments are allowed',
   invalidTypeErrorCode: 'REQUEST_ATTACHMENT_FILE_TYPE_INVALID',

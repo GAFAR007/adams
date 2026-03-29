@@ -26,6 +26,10 @@ class _CustomerRegisterScreenState
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _isPasswordVisible = false;
+  bool _isConfirmPasswordVisible = false;
+  String? _formErrorMessage;
 
   @override
   void dispose() {
@@ -34,6 +38,7 @@ class _CustomerRegisterScreenState
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -41,6 +46,26 @@ class _CustomerRegisterScreenState
     debugPrint(
       'CustomerRegisterScreen._submit: customer registration submitted',
     );
+
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+    if (password.length < 8) {
+      setState(() {
+        _formErrorMessage = 'Password must be at least 8 characters.';
+      });
+      return;
+    }
+
+    if (password != confirmPassword) {
+      setState(() {
+        _formErrorMessage = 'Passwords do not match.';
+      });
+      return;
+    }
+
+    setState(() {
+      _formErrorMessage = null;
+    });
 
     try {
       await ref
@@ -50,7 +75,7 @@ class _CustomerRegisterScreenState
             lastName: _lastNameController.text.trim(),
             email: _emailController.text.trim(),
             phone: _phoneController.text.trim(),
-            password: _passwordController.text,
+            password: password,
           );
       // WHY: Registration creates a reusable credential pair, so finish the autofill session to prompt Chrome to save it.
       TextInput.finishAutofillContext(shouldSave: true);
@@ -114,18 +139,60 @@ class _CustomerRegisterScreenState
             const SizedBox(height: 16),
             TextField(
               controller: _passwordController,
-              obscureText: true,
+              obscureText: !_isPasswordVisible,
               autofillHints: const <String>[AutofillHints.newPassword],
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                suffixIcon: IconButton(
+                  tooltip: _isPasswordVisible
+                      ? 'Hide password'
+                      : 'Show password',
+                  onPressed: () {
+                    setState(() => _isPasswordVisible = !_isPasswordVisible);
+                  },
+                  icon: Icon(
+                    _isPasswordVisible
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _confirmPasswordController,
+              obscureText: !_isConfirmPasswordVisible,
               autocorrect: false,
               enableSuggestions: false,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => _submit(),
-              decoration: const InputDecoration(labelText: 'Password'),
+              decoration: InputDecoration(
+                labelText: 'Confirm password',
+                suffixIcon: IconButton(
+                  tooltip: _isConfirmPasswordVisible
+                      ? 'Hide password'
+                      : 'Show password',
+                  onPressed: () {
+                    setState(() {
+                      _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+                    });
+                  },
+                  icon: Icon(
+                    _isConfirmPasswordVisible
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                  ),
+                ),
+              ),
             ),
-            if (authState.errorMessage != null) ...<Widget>[
+            if (_formErrorMessage != null ||
+                authState.errorMessage != null) ...<Widget>[
               const SizedBox(height: 16),
               Text(
-                authState.errorMessage!,
+                _formErrorMessage ?? authState.errorMessage!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],

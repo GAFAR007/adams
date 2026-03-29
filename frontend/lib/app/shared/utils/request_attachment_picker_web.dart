@@ -12,32 +12,65 @@ Future<PickedRequestAttachmentFile?> pickRequestAttachmentFile() async {
   final completer = Completer<PickedRequestAttachmentFile?>();
   final input = html.FileUploadInputElement()
     ..accept =
-        '.png,.jpg,.jpeg,.webp,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        '.png,.jpg,.jpeg,.webp,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ..multiple = false
+    ..style.display = 'none';
+
+  html.document.body?.append(input);
+
+  void cleanup() {
+    input.remove();
+  }
 
   input.onChange.listen((_) {
     final file = input.files?.first;
     if (file == null) {
-      completer.complete(null);
+      cleanup();
+      if (!completer.isCompleted) {
+        completer.complete(null);
+      }
       return;
     }
 
     final reader = html.FileReader();
-    reader.onLoad.listen((_) {
+    reader.onLoadEnd.listen((_) {
       final result = reader.result;
-      if (result is! ByteBuffer) {
-        completer.complete(null);
+      final bytes = switch (result) {
+        ByteBuffer value => Uint8List.view(value),
+        Uint8List value => value,
+        _ => null,
+      };
+      cleanup();
+
+      if (bytes == null) {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            StateError('Browser could not decode the selected attachment.'),
+          );
+        }
         return;
       }
 
-      completer.complete(
-        PickedRequestAttachmentFile(
-          name: file.name,
-          bytes: Uint8List.view(result),
-          mimeType: file.type.isEmpty ? 'application/octet-stream' : file.type,
-        ),
-      );
+      if (!completer.isCompleted) {
+        completer.complete(
+          PickedRequestAttachmentFile(
+            name: file.name,
+            bytes: bytes,
+            mimeType: file.type.isEmpty
+                ? 'application/octet-stream'
+                : file.type,
+          ),
+        );
+      }
     });
-    reader.onError.listen((_) => completer.complete(null));
+    reader.onError.listen((_) {
+      cleanup();
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError('Browser could not read the selected attachment.'),
+        );
+      }
+    });
     reader.readAsArrayBuffer(file);
   });
   input.click();

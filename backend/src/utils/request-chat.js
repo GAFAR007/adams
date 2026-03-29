@@ -44,6 +44,7 @@ function buildCustomerMessage({
   customerId,
   customerName,
   text,
+  actionType = null,
   attachment = null,
 }) {
   // WHY: Customer messages should always carry the account owner id so later audit or threading work can trace authorship.
@@ -51,6 +52,7 @@ function buildCustomerMessage({
     senderType: REQUEST_MESSAGE_SENDERS.CUSTOMER,
     senderId: customerId,
     senderName: customerName,
+    actionType,
     text,
     attachment,
   });
@@ -91,7 +93,7 @@ function buildAiMessage(text) {
   // WHY: AI placeholder messages should be clearly labeled so customers can tell they are not from staff.
   return buildBaseMessage({
     senderType: REQUEST_MESSAGE_SENDERS.AI,
-    senderName: 'AI Assistant',
+    senderName: 'Naima AI',
     text,
   });
 }

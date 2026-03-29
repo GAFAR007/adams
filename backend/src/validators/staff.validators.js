@@ -9,12 +9,13 @@ const {
   PAYMENT_METHODS,
   REQUEST_MESSAGE_ACTIONS,
 } = require('../constants/app.constants');
+const { optionalPhoneValidator } = require('./phone.validators');
 
 const staffRegisterValidator = [
   body('inviteToken').trim().notEmpty().withMessage('Invite token is required'),
   body('firstName').trim().notEmpty().withMessage('First name is required'),
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
-  body('phone').optional().trim().isLength({ min: 7 }).withMessage('Phone number must be at least 7 characters'),
+  optionalPhoneValidator,
   body('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters long'),
@@ -50,6 +51,11 @@ const staffPostRequestMessageValidator = [
     .optional({ nullable: true })
     .isIn(Object.values(REQUEST_MESSAGE_ACTIONS))
     .withMessage('Action type is invalid'),
+];
+
+const staffUpdateRequestAiControlValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('enabled').isBoolean().withMessage('Enabled must be true or false'),
 ];
 
 const staffCreateRequestInvoiceValidator = [
@@ -97,5 +103,6 @@ module.exports = {
   staffRequestFiltersValidator,
   staffReviewPaymentProofValidator,
   staffUpdateAvailabilityValidator,
+  staffUpdateRequestAiControlValidator,
   staffUpdateRequestStatusValidator,
 };

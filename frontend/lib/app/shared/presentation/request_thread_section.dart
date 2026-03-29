@@ -245,6 +245,10 @@ class _RequestMessageBubble extends StatelessWidget {
                     isOwnMessage: _isOwnMessage,
                     dark: dark,
                   ),
+                  if (action != null) ...<Widget>[
+                    const SizedBox(height: 10),
+                    action,
+                  ],
                   if (hasVisibleBodyText) const SizedBox(height: 10),
                 ],
                 if (hasVisibleBodyText)
@@ -255,7 +259,7 @@ class _RequestMessageBubble extends StatelessWidget {
                       height: 1.32,
                     ),
                   ),
-                if (action != null) ...<Widget>[
+                if (action != null && message.attachment == null) ...<Widget>[
                   const SizedBox(height: 12),
                   action,
                 ],
@@ -413,7 +417,11 @@ class _RequestThreadNote extends StatelessWidget {
         ? const Color(0xFFFFF1D6)
         : const Color(0xFFECE6DA);
     final timestampLabel = _formatTimestamp(message.createdAt);
-    final title = message.isAi ? 'AI update' : 'System update';
+    final title = message.isAi
+        ? (message.senderName.trim().isNotEmpty
+              ? message.senderName
+              : 'Naima AI')
+        : 'System update';
     final icon = message.isAi
         ? Icons.auto_awesome_rounded
         : Icons.info_outline_rounded;

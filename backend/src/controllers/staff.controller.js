@@ -164,6 +164,27 @@ const staffPostRequestMessageController = asyncHandler(async (req, res) => {
   });
 });
 
+const staffUpdateRequestAiControlController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffUpdateRequestAiControl',
+    intent: 'Toggle whether Naima is covering an assigned customer chat',
+  });
+
+  const result = await staffService.updateAssignedRequestAiControl(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.enabled,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const staffCreateRequestInvoiceController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -216,5 +237,6 @@ module.exports = {
   staffReviewPaymentProofController,
   staffRegisterController,
   staffUpdateAvailabilityController,
+  staffUpdateRequestAiControlController,
   staffUpdateRequestStatusController,
 };

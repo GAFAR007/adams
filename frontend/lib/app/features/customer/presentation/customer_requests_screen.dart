@@ -8,11 +8,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/models/service_request_model.dart';
+import '../../../core/network/api_client.dart';
 import '../../../shared/presentation/presence_chip.dart';
 import '../../../shared/presentation/request_message_composer.dart';
 import '../../../shared/presentation/request_thread_section.dart';
 import '../../../shared/presentation/workspace_bottom_nav.dart';
+import '../../../shared/utils/external_url_opener.dart';
 import '../../../shared/utils/payment_proof_picker.dart';
+import '../../../shared/utils/payment_proof_picker_types.dart';
 import '../../../shared/utils/request_attachment_picker.dart';
 import '../../../theme/app_theme.dart';
 import '../../auth/application/auth_controller.dart';
@@ -21,7 +24,18 @@ import '../data/customer_repository.dart';
 final customerRequestsProvider = FutureProvider<List<ServiceRequestModel>>((
   Ref ref,
 ) async {
-  debugPrint('customerRequestsProvider: fetching customer requests');
+  final customerId = ref.watch(
+    authControllerProvider.select((state) => state.user?.id),
+  );
+  final role = ref.watch(authControllerProvider.select((state) => state.role));
+
+  if (customerId == null || customerId.isEmpty || role != 'customer') {
+    return const <ServiceRequestModel>[];
+  }
+
+  debugPrint(
+    'customerRequestsProvider: fetching customer requests for $customerId',
+  );
   return ref.watch(customerRepositoryProvider).fetchRequests();
 });
 
@@ -46,6 +60,13 @@ class _CustomerRequestsScreenState
   final Set<String> _submittingMessageIds = <String>{};
   final Set<String> _uploadingAttachmentIds = <String>{};
   final Set<String> _uploadingPaymentProofIds = <String>{};
+  final Map<String, String> _dismissedInvoiceCardKeysByRequestId =
+      <String, String>{};
+  final Map<String, double?> _paymentProofUploadProgressByRequestId =
+      <String, double?>{};
+  final Map<String, String> _paymentProofUploadErrorsByRequestId =
+      <String, String>{};
+  final Set<String> _refreshingInvoiceIds = <String>{};
   _CustomerInboxFilter _selectedFilter = _CustomerInboxFilter.all;
   _CustomerWorkspaceTab _selectedWorkspaceTab = _CustomerWorkspaceTab.inbox;
   String? _selectedRequestId;
@@ -76,6 +97,7 @@ class _CustomerRequestsScreenState
       return;
     }
 
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _submittingMessageIds.add(request.id));
     debugPrint(
       'CustomerRequestsScreen._sendMessage: sending message for ${request.id}',
@@ -87,20 +109,15 @@ class _CustomerRequestsScreenState
           .sendMessage(requestId: request.id, message: text);
       controller.clear();
       ref.invalidate(customerRequestsProvider);
+      await ref.read(customerRequestsProvider.future);
 
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            request.assignedStaff == null
-                ? 'Update added to the queue'
-                : 'Message sent to ${request.assignedStaff!.fullName}',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_sentMessageLabel(request))));
     } catch (error) {
       if (!mounted) {
         return;
@@ -159,13 +176,20 @@ class _CustomerRequestsScreenState
     }
 
     if (request.assignedStaff != null) {
-      final availability = request.assignedStaff!.staffAvailability == 'online'
+      final staffName = request.assignedStaff!.fullName;
+      if (request.isAiInControl) {
+        return _assignedStaffIsOnline(request)
+            ? 'Assigned to $staffName. Naima is covering the chat for now and $staffName can resume from the same thread.'
+            : 'Assigned to $staffName. $staffName is offline right now, so Naima is holding the chat until staff resumes.';
+      }
+
+      final availability = _assignedStaffIsOnline(request)
           ? 'online'
           : 'offline';
-      return 'Assigned to ${request.assignedStaff!.fullName}. Staff is currently $availability.';
+      return 'Assigned to $staffName. Staff is currently $availability.';
     }
 
-    return 'Waiting in the live queue. AI is keeping the conversation warm until staff joins.';
+    return 'Waiting in the live queue. Naima can answer quick questions and keep extra notes organised until a staff member joins.';
   }
 
   String _messagePreview(ServiceRequestModel request) {
@@ -255,23 +279,229 @@ class _CustomerRequestsScreenState
       return;
     }
 
-    final pickedFile = await pickPaymentProofFile();
-    if (pickedFile == null) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    PickedPaymentProofFile? pickedFile;
+    try {
+      pickedFile = await pickPaymentProofFile();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _paymentProofUploadErrorsByRequestId[request.id] =
+            _buildPaymentProofUploadPickerDebugMessage(
+              error,
+              requestId: request.id,
+            );
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not read the selected proof file. See the quotation card for details.',
+          ),
+        ),
+      );
       return;
     }
 
-    setState(() => _uploadingPaymentProofIds.add(request.id));
+    if (pickedFile == null) {
+      return;
+    }
+    final selectedFile = pickedFile;
+
+    setState(() {
+      _uploadingPaymentProofIds.add(request.id);
+      _paymentProofUploadProgressByRequestId[request.id] = 0;
+      _paymentProofUploadErrorsByRequestId.remove(request.id);
+    });
 
     try {
       await ref
           .read(customerRepositoryProvider)
           .uploadPaymentProof(
             requestId: request.id,
-            bytes: pickedFile.bytes,
-            fileName: pickedFile.name,
-            mimeType: pickedFile.mimeType,
+            bytes: selectedFile.bytes,
+            fileName: selectedFile.name,
+            mimeType: selectedFile.mimeType,
+            onSendProgress: (int sent, int total) {
+              if (!mounted) {
+                return;
+              }
+
+              final progress = total <= 0
+                  ? null
+                  : (sent / total).clamp(0.0, 1.0);
+              setState(
+                () => _paymentProofUploadProgressByRequestId[request.id] =
+                    progress,
+              );
+            },
           );
       ref.invalidate(customerRequestsProvider);
+      await ref.read(customerRequestsProvider.future);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _paymentProofUploadErrorsByRequestId.remove(request.id);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment proof sent to staff')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final failureSummary = _friendlyApiErrorMessage(error);
+      setState(() {
+        _paymentProofUploadErrorsByRequestId[request.id] =
+            _buildPaymentProofUploadDebugMessage(
+              error,
+              requestId: request.id,
+              fileName: selectedFile.name,
+              mimeType: selectedFile.mimeType,
+              sizeBytes: selectedFile.bytes.length,
+            );
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$failureSummary. See the quotation card for details.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadingPaymentProofIds.remove(request.id);
+          _paymentProofUploadProgressByRequestId.remove(request.id);
+        });
+      }
+    }
+  }
+
+  String _friendlyApiErrorMessage(Object error) {
+    if (error is ApiException) {
+      final hint = error.resolutionHint?.trim() ?? '';
+      if (hint.isNotEmpty) {
+        return '${error.message}. $hint';
+      }
+
+      return error.message;
+    }
+
+    return error.toString().replaceFirst('Exception: ', '');
+  }
+
+  String _buildPaymentProofUploadDebugMessage(
+    Object error, {
+    required String requestId,
+    required String fileName,
+    required String mimeType,
+    required int sizeBytes,
+  }) {
+    final details = <String>[
+      if (error is ApiException)
+        error.message
+      else
+        _friendlyApiErrorMessage(error),
+      if (error is ApiException && error.debugSummary.isNotEmpty)
+        error.debugSummary,
+      'File: $fileName',
+      'Mime: ${mimeType.trim().isEmpty ? 'unknown' : mimeType}',
+      'Size: ${_formatUploadSize(sizeBytes)}',
+      'Request: $requestId',
+    ];
+
+    return details.join('\n');
+  }
+
+  String _formatUploadSize(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+    }
+    if (bytes >= 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+
+    return '$bytes B';
+  }
+
+  String _buildPaymentProofUploadPickerDebugMessage(
+    Object error, {
+    required String requestId,
+  }) {
+    final details = <String>[
+      'Proof picker failed before upload started.',
+      _friendlyApiErrorMessage(error),
+      'Request: $requestId',
+    ];
+
+    return details.join('\n');
+  }
+
+  Widget? _buildCustomerThreadMessageAction(
+    ServiceRequestModel request,
+    RequestMessageModel message,
+  ) {
+    final invoice = request.invoice;
+    if (invoice == null || !message.isCustomerUploadPaymentProof) {
+      return null;
+    }
+
+    return OutlinedButton.icon(
+      onPressed: () => _showQuotationSheet(invoice),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      icon: const Icon(Icons.description_outlined, size: 18),
+      label: const Text('View quotation'),
+    );
+  }
+
+  String _invoiceCardDismissKey(RequestInvoiceModel invoice) {
+    return <String>[
+      invoice.invoiceNumber,
+      invoice.status,
+      invoice.proof?.relativeUrl ?? '',
+      invoice.reviewedAt?.toIso8601String() ?? '',
+      invoice.receiptIssuedAt?.toIso8601String() ?? '',
+    ].join('|');
+  }
+
+  bool _shouldShowInvoiceCard(ServiceRequestModel request) {
+    final invoice = request.invoice;
+    if (invoice == null) {
+      return false;
+    }
+
+    final dismissedKey = _dismissedInvoiceCardKeysByRequestId[request.id];
+    if (dismissedKey == null) {
+      return true;
+    }
+
+    return dismissedKey != _invoiceCardDismissKey(invoice);
+  }
+
+  Future<void> _refreshInvoiceStatus(ServiceRequestModel request) async {
+    final invoice = request.invoice;
+    if (invoice == null || !invoice.supportsOnlineCheckout) {
+      return;
+    }
+
+    setState(() => _refreshingInvoiceIds.add(request.id));
+
+    try {
+      ref.invalidate(customerRequestsProvider);
+      await ref.read(customerRequestsProvider.future);
 
       if (!mounted) {
         return;
@@ -279,7 +509,7 @@ class _CustomerRequestsScreenState
 
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Payment proof uploaded')));
+      ).showSnackBar(const SnackBar(content: Text('Payment status refreshed')));
     } catch (error) {
       if (!mounted) {
         return;
@@ -292,9 +522,165 @@ class _CustomerRequestsScreenState
       );
     } finally {
       if (mounted) {
-        setState(() => _uploadingPaymentProofIds.remove(request.id));
+        setState(() => _refreshingInvoiceIds.remove(request.id));
       }
     }
+  }
+
+  Future<void> _openExternalPaymentUrl(
+    String? url, {
+    required String failureMessage,
+  }) async {
+    if (url == null || url.trim().isEmpty) {
+      return;
+    }
+
+    final opened = await openExternalUrl(url);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(failureMessage)));
+    }
+  }
+
+  Future<void> _showQuotationSheet(RequestInvoiceModel invoice) {
+    final dueDateLabel = _formatActionDate(invoice.dueDate);
+    final sentAtLabel = invoice.sentAt == null
+        ? null
+        : _formatActionDateTime(invoice.sentAt);
+    final proofUploadedLabel = invoice.proof?.uploadedAt == null
+        ? null
+        : _formatActionDateTime(invoice.proof!.uploadedAt);
+
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext modalContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: _customerWorkspacePanelColor(),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            'Quotation ${invoice.invoiceNumber}',
+                            style: Theme.of(modalContext).textTheme.titleLarge
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(modalContext).pop(),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        _PaymentMetaChip(
+                          label: 'EUR ${invoice.amount.toStringAsFixed(2)}',
+                          dark: true,
+                        ),
+                        _PaymentMetaChip(
+                          label: 'Due $dueDateLabel',
+                          dark: true,
+                        ),
+                        _PaymentMetaChip(
+                          label: requestStatusLabelFor(invoice.status),
+                          dark: true,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _CustomerPaymentDetailTile(
+                      label: 'Payment method',
+                      value: invoice.paymentMethodLabel,
+                    ),
+                    if (sentAtLabel != null) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Sent',
+                        value: sentAtLabel,
+                      ),
+                    ],
+                    if (invoice.note.trim().isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Quotation note',
+                        value: invoice.note,
+                      ),
+                    ],
+                    if (invoice.paymentInstructions
+                        .trim()
+                        .isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Payment details',
+                        value: invoice.paymentInstructions,
+                      ),
+                    ],
+                    if (invoice.reviewNote.trim().isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Staff review note',
+                        value: invoice.reviewNote,
+                      ),
+                    ],
+                    if (invoice.proof?.originalName.trim().isNotEmpty ==
+                        true) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Uploaded proof',
+                        value: proofUploadedLabel == null
+                            ? invoice.proof!.originalName
+                            : '${invoice.proof!.originalName}\nUploaded $proofUploadedLabel',
+                      ),
+                    ],
+                    if (invoice.paymentReference?.trim().isNotEmpty ==
+                        true) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Payment reference',
+                        value: invoice.paymentReference!,
+                      ),
+                    ],
+                    if (invoice.receiptNumber?.trim().isNotEmpty ==
+                        true) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _CustomerPaymentDetailTile(
+                        label: 'Receipt number',
+                        value: invoice.receiptNumber!,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _uploadRequestAttachment(ServiceRequestModel request) async {
@@ -302,6 +688,7 @@ class _CustomerRequestsScreenState
       return;
     }
 
+    FocusManager.instance.primaryFocus?.unfocus();
     final pickedFile = await pickRequestAttachmentFile();
     if (pickedFile == null) {
       return;
@@ -324,20 +711,15 @@ class _CustomerRequestsScreenState
           );
       controller.clear();
       ref.invalidate(customerRequestsProvider);
+      await ref.read(customerRequestsProvider.future);
 
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            request.assignedStaff == null
-                ? 'File added to the queue'
-                : 'File sent to ${request.assignedStaff?.fullName ?? 'staff'}',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_sentAttachmentLabel(request))));
     } catch (error) {
       if (!mounted) {
         return;
@@ -423,6 +805,112 @@ class _CustomerRequestsScreenState
         : '${assignedStaff.fullName} offline';
   }
 
+  String _conversationSubtitle(ServiceRequestModel request) {
+    final assignedStaff = request.assignedStaff;
+    if (assignedStaff == null) {
+      return 'Queue conversation';
+    }
+
+    if (request.isAiInControl) {
+      return _assignedStaffIsOnline(request)
+          ? 'Naima is covering for ${assignedStaff.fullName}'
+          : 'Naima is covering while ${assignedStaff.fullName} is offline';
+    }
+
+    return 'Chat with ${assignedStaff.fullName}';
+  }
+
+  String _composerHintText(ServiceRequestModel request) {
+    final assignedStaff = request.assignedStaff;
+    if (assignedStaff == null) {
+      return 'Message the queue while you wait';
+    }
+
+    if (request.isAiInControl) {
+      return _assignedStaffIsOnline(request)
+          ? 'Ask Naima while ${assignedStaff.fullName} steps away'
+          : 'Ask Naima while ${assignedStaff.fullName} is away';
+    }
+
+    return 'Reply to ${assignedStaff.fullName}';
+  }
+
+  String _composerButtonLabel(ServiceRequestModel request) {
+    if (request.assignedStaff == null) {
+      return 'Send queue update';
+    }
+
+    return request.isAiInControl ? 'Ask Naima' : 'Reply to staff';
+  }
+
+  String _sentMessageLabel(ServiceRequestModel request) {
+    final assignedStaff = request.assignedStaff;
+    if (assignedStaff == null) {
+      return 'Update added to the queue';
+    }
+
+    if (request.isAiInControl) {
+      return 'Message sent while Naima covers the chat';
+    }
+
+    return 'Message sent to ${assignedStaff.fullName}';
+  }
+
+  String _sentAttachmentLabel(ServiceRequestModel request) {
+    final assignedStaff = request.assignedStaff;
+    if (assignedStaff == null) {
+      return 'File added to the queue';
+    }
+
+    if (request.isAiInControl) {
+      return 'File sent while Naima covers the chat';
+    }
+
+    return 'File sent to ${assignedStaff.fullName}';
+  }
+
+  Widget _buildAiCoverageChip(
+    BuildContext context,
+    ServiceRequestModel request, {
+    bool compact = false,
+  }) {
+    final label = _assignedStaffIsOnline(request)
+        ? 'Naima covering'
+        : 'Naima active';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.cobalt.withValues(alpha: compact ? 0.18 : 0.2),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.cobalt.withValues(alpha: 0.34)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 10,
+          vertical: compact ? 4 : 6,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.auto_awesome_rounded,
+              size: compact ? 13 : 14,
+              color: Colors.white.withValues(alpha: 0.92),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Colors.white.withValues(alpha: 0.92),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   RequestMessageModel? _latestCustomerUpdateRequestAction(
     ServiceRequestModel request,
   ) {
@@ -501,7 +989,7 @@ class _CustomerRequestsScreenState
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0xFF111316),
+                color: _customerWorkspacePanelColor(),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
@@ -548,6 +1036,10 @@ class _CustomerRequestsScreenState
                         isOnline: _assignedStaffIsOnline(request),
                         dark: true,
                       ),
+                      if (request.isAiInControl) ...<Widget>[
+                        const SizedBox(height: 8),
+                        _buildAiCoverageChip(modalContext, request),
+                      ],
                       const SizedBox(height: 12),
                     ],
                     _ConversationMetaPill(
@@ -569,7 +1061,11 @@ class _CustomerRequestsScreenState
                     const SizedBox(height: 12),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        color: const Color(0xFF15181D),
+                        color: Color.lerp(
+                          _customerWorkspaceBottomColor(),
+                          Colors.white,
+                          0.04,
+                        ),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.08),
@@ -861,6 +1357,13 @@ class _CustomerRequestsScreenState
                               dark: true,
                               compact: true,
                             ),
+                          if (request.assignedStaff != null &&
+                              request.isAiInControl)
+                            _buildAiCoverageChip(
+                              context,
+                              request,
+                              compact: true,
+                            ),
                           if (latestAlertLabel.isNotEmpty)
                             _InboxAlertPill(
                               label: latestAlertLabel,
@@ -886,8 +1389,8 @@ class _CustomerRequestsScreenState
     ServiceRequestModel? selectedRequest, {
     bool edgeToEdge = false,
   }) {
-    const chatTopColor = Color(0xFF121418);
-    const chatBottomColor = Color(0xFF0D0E10);
+    final chatTopColor = _customerWorkspaceTopColor();
+    final chatBottomColor = _customerWorkspaceBottomColor();
     final BorderRadius? surfaceRadius = edgeToEdge
         ? null
         : BorderRadius.circular(34);
@@ -910,7 +1413,7 @@ class _CustomerRequestsScreenState
     return DecoratedBox(
       decoration: BoxDecoration(
         color: chatBottomColor,
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[chatTopColor, chatBottomColor],
@@ -1076,14 +1579,14 @@ class _CustomerRequestsScreenState
     final BorderRadius? surfaceRadius = edgeToEdge
         ? null
         : BorderRadius.circular(34);
-    const chatTopColor = Color(0xFF121418);
-    const chatBottomColor = Color(0xFF0D0E10);
+    final chatTopColor = _customerWorkspaceTopColor();
+    final chatBottomColor = _customerWorkspaceBottomColor();
 
     if (request == null) {
       return DecoratedBox(
         decoration: BoxDecoration(
           color: chatBottomColor,
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: <Color>[chatTopColor, chatBottomColor],
@@ -1114,7 +1617,7 @@ class _CustomerRequestsScreenState
     return DecoratedBox(
       decoration: BoxDecoration(
         color: chatBottomColor,
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[chatTopColor, chatBottomColor],
@@ -1191,9 +1694,7 @@ class _CustomerRequestsScreenState
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                request.assignedStaff == null
-                                    ? 'Queue conversation'
-                                    : 'Chat with ${request.assignedStaff!.fullName}',
+                                _conversationSubtitle(request),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodySmall
@@ -1216,6 +1717,13 @@ class _CustomerRequestsScreenState
                                           : 'Offline',
                                       isOnline: _assignedStaffIsOnline(request),
                                       dark: true,
+                                      compact: true,
+                                    ),
+                                  if (request.assignedStaff != null &&
+                                      request.isAiInControl)
+                                    _buildAiCoverageChip(
+                                      context,
+                                      request,
                                       compact: true,
                                     ),
                                   _ConversationHeaderActionChip(
@@ -1273,6 +1781,12 @@ class _CustomerRequestsScreenState
                             dark: true,
                             emptyLabel:
                                 'No queue messages yet. New updates will appear here.',
+                            messageActionBuilder:
+                                (RequestMessageModel message) =>
+                                    _buildCustomerThreadMessageAction(
+                                      request,
+                                      message,
+                                    ),
                           ),
                         ),
                       ),
@@ -1302,7 +1816,7 @@ class _CustomerRequestsScreenState
                                 context.go('/app/requests/${request.id}/edit'),
                           ),
                         ),
-                      if (request.invoice != null)
+                      if (_shouldShowInvoiceCard(request))
                         Padding(
                           padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
                           child: _CustomerPaymentCard(
@@ -1310,6 +1824,71 @@ class _CustomerRequestsScreenState
                             dueDateLabel: _formatActionDate(
                               request.invoice!.dueDate,
                             ),
+                            isUploadingProof: _uploadingPaymentProofIds
+                                .contains(request.id),
+                            uploadProgress:
+                                _paymentProofUploadProgressByRequestId[request
+                                    .id],
+                            uploadErrorDetails:
+                                _paymentProofUploadErrorsByRequestId[request
+                                    .id],
+                            isRefreshingStatus: _refreshingInvoiceIds.contains(
+                              request.id,
+                            ),
+                            onDismissUploadError:
+                                _paymentProofUploadErrorsByRequestId[request
+                                        .id] !=
+                                    null
+                                ? () => setState(
+                                    () => _paymentProofUploadErrorsByRequestId
+                                        .remove(request.id),
+                                  )
+                                : null,
+                            onDismissNotification:
+                                request.invoice!.isProofSubmitted &&
+                                    !_uploadingPaymentProofIds.contains(
+                                      request.id,
+                                    ) &&
+                                    (_paymentProofUploadErrorsByRequestId[request
+                                                .id]
+                                            ?.trim()
+                                            .isNotEmpty !=
+                                        true)
+                                ? () => setState(
+                                    () =>
+                                        _dismissedInvoiceCardKeysByRequestId[request
+                                            .id] = _invoiceCardDismissKey(
+                                          request.invoice!,
+                                        ),
+                                  )
+                                : null,
+                            onViewQuotation:
+                                request.invoice!.proof?.fileUrl == null
+                                ? () => _showQuotationSheet(request.invoice!)
+                                : null,
+                            onUploadProof:
+                                request.invoice!.canCustomerUploadProof
+                                ? () => _uploadPaymentProof(request)
+                                : null,
+                            onPayOnline: request.invoice!.canCustomerPayOnline
+                                ? () => _openExternalPaymentUrl(
+                                    request.invoice!.paymentLinkUrl,
+                                    failureMessage:
+                                        'Opening the payment page is not supported here',
+                                  )
+                                : null,
+                            onRefreshPaymentStatus:
+                                request.invoice!.supportsOnlineCheckout &&
+                                    !request.invoice!.isApproved
+                                ? () => _refreshInvoiceStatus(request)
+                                : null,
+                            onOpenReceipt: request.invoice!.receiptUrl != null
+                                ? () => _openExternalPaymentUrl(
+                                    request.invoice!.receiptUrl,
+                                    failureMessage:
+                                        'Opening the receipt is not supported here',
+                                  )
+                                : null,
                             dark: true,
                           ),
                         ),
@@ -1356,12 +1935,8 @@ class _CustomerRequestsScreenState
                                     : () => _uploadPaymentProof(request),
                               ),
                           ],
-                          hintText: request.assignedStaff == null
-                              ? 'Message the queue while you wait'
-                              : 'Reply to ${request.assignedStaff!.fullName}',
-                          buttonLabel: request.assignedStaff == null
-                              ? 'Send queue update'
-                              : 'Reply to staff',
+                          hintText: _composerHintText(request),
+                          buttonLabel: _composerButtonLabel(request),
                           isSubmitting: isSubmitting,
                           dark: true,
                           isEnabled: request.status != 'closed',
@@ -1396,10 +1971,15 @@ class _CustomerRequestsScreenState
     final requestsAsync = ref.watch(customerRequestsProvider);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final canShowBottomNav = screenWidth < 980;
+    final pageTopColor = _customerWorkspacePageTopColor();
+    final pageMiddleColor = _customerWorkspacePageMiddleColor();
+    final pageBottomColor = _customerWorkspacePageBottomColor();
 
     return Scaffold(
       appBar: AppBar(
         title: Text('My Requests · ${authState.user?.firstName ?? 'Customer'}'),
+        backgroundColor: pageTopColor,
+        surfaceTintColor: Colors.transparent,
         actions: <Widget>[
           IconButton(
             tooltip: 'Create request',
@@ -1418,86 +1998,142 @@ class _CustomerRequestsScreenState
           ),
         ],
       ),
-      body: requestsAsync.when(
-        data: (List<ServiceRequestModel> requests) {
-          final filteredRequests = _filterRequests(requests);
-
-          return LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final isWide = constraints.maxWidth >= 980;
-              final showMobileChat =
-                  !isWide &&
-                  _selectedWorkspaceTab == _CustomerWorkspaceTab.chat;
-              final selectedRequest = _resolveSelectedRequest(
-                filteredRequests,
-                preferFirst: isWide || showMobileChat,
-              );
-              final isConversationVisible = isWide || showMobileChat;
-
-              if (isConversationVisible) {
-                _scheduleMarkRequestViewed(selectedRequest);
-              }
-
-              if (requests.isEmpty) {
-                return Padding(
-                  padding: EdgeInsets.all(isWide ? 20 : 0),
-                  child: _buildConversationPane(
-                    context,
-                    null,
-                    edgeToEdge: !isWide,
-                  ),
-                );
-              }
-
-              if (isWide) {
-                return Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      SizedBox(
-                        width: 340,
-                        child: _buildSidebar(
-                          context,
-                          requests,
-                          filteredRequests,
-                          selectedRequest,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildConversationPane(context, selectedRequest),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              if (showMobileChat) {
-                return _buildConversationPane(
-                  context,
-                  selectedRequest,
-                  edgeToEdge: true,
-                );
-              }
-
-              return _buildSidebar(
-                context,
-                requests,
-                filteredRequests,
-                selectedRequest,
-                edgeToEdge: true,
-              );
-            },
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (Object error, StackTrace stackTrace) => DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(30),
+      backgroundColor: pageTopColor,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: <Color>[pageTopColor, pageMiddleColor, pageBottomColor],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: const <double>[0, 0.42, 1],
           ),
-          child: Center(child: Text(error.toString())),
+        ),
+        child: Stack(
+          children: <Widget>[
+            Positioned(
+              top: -120,
+              right: -90,
+              child: _WorkspaceBackdropGlow(
+                diameter: 320,
+                color: AppTheme.cobalt.withValues(alpha: 0.11),
+              ),
+            ),
+            Positioned(
+              top: 180,
+              left: -110,
+              child: _WorkspaceBackdropGlow(
+                diameter: 260,
+                color: Color.lerp(
+                  AppTheme.cobalt,
+                  Colors.white,
+                  0.55,
+                )!.withValues(alpha: 0.16),
+              ),
+            ),
+            Positioned(
+              bottom: -160,
+              left: -70,
+              child: _WorkspaceBackdropGlow(
+                diameter: 250,
+                color: AppTheme.clay.withValues(alpha: 0.22),
+              ),
+            ),
+            requestsAsync.when(
+              skipLoadingOnRefresh: true,
+              skipLoadingOnReload: true,
+              data: (List<ServiceRequestModel> requests) {
+                final filteredRequests = _filterRequests(requests);
+
+                return LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) {
+                    final isWide = constraints.maxWidth >= 980;
+                    final showMobileChat =
+                        !isWide &&
+                        _selectedWorkspaceTab == _CustomerWorkspaceTab.chat;
+                    final selectedRequest = _resolveSelectedRequest(
+                      filteredRequests,
+                      preferFirst: isWide || showMobileChat,
+                    );
+                    final isConversationVisible = isWide || showMobileChat;
+
+                    if (isConversationVisible) {
+                      _scheduleMarkRequestViewed(selectedRequest);
+                    }
+
+                    if (requests.isEmpty) {
+                      return Padding(
+                        padding: EdgeInsets.all(isWide ? 20 : 0),
+                        child: _buildConversationPane(
+                          context,
+                          null,
+                          edgeToEdge: !isWide,
+                        ),
+                      );
+                    }
+
+                    if (isWide) {
+                      return Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            SizedBox(
+                              width: 340,
+                              child: _buildSidebar(
+                                context,
+                                requests,
+                                filteredRequests,
+                                selectedRequest,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: _buildConversationPane(
+                                context,
+                                selectedRequest,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    if (showMobileChat) {
+                      return _buildConversationPane(
+                        context,
+                        selectedRequest,
+                        edgeToEdge: true,
+                      );
+                    }
+
+                    return _buildSidebar(
+                      context,
+                      requests,
+                      filteredRequests,
+                      selectedRequest,
+                      edgeToEdge: true,
+                    );
+                  },
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (Object error, StackTrace stackTrace) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.94),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(error.toString()),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: requestsAsync.maybeWhen(
@@ -1525,6 +2161,24 @@ class _CustomerRequestsScreenState
     );
   }
 }
+
+Color _customerWorkspaceTopColor() =>
+    Color.lerp(AppTheme.ink, AppTheme.cobalt, 0.22)!;
+
+Color _customerWorkspaceBottomColor() =>
+    Color.lerp(AppTheme.ink, AppTheme.cobalt, 0.08)!;
+
+Color _customerWorkspacePanelColor() =>
+    Color.lerp(AppTheme.ink, AppTheme.cobalt, 0.16)!;
+
+Color _customerWorkspacePageTopColor() =>
+    Color.lerp(AppTheme.sand, AppTheme.cobalt, 0.12)!;
+
+Color _customerWorkspacePageMiddleColor() =>
+    Color.lerp(AppTheme.sand, AppTheme.ink, 0.07)!;
+
+Color _customerWorkspacePageBottomColor() =>
+    Color.lerp(AppTheme.sand, AppTheme.clay, 0.3)!;
 
 class _CompactStatusPill extends StatelessWidget {
   const _CompactStatusPill({required this.status});
@@ -1612,7 +2266,11 @@ class _ComposerQuickActionButton extends StatelessWidget {
       decoration: BoxDecoration(
         color: dark
             ? (isEnabled
-                  ? const Color(0xFF17181B)
+                  ? Color.lerp(
+                      _customerWorkspaceBottomColor(),
+                      Colors.white,
+                      0.04,
+                    )!
                   : Colors.white.withValues(alpha: 0.08))
             : isEnabled
             ? accentColor.withValues(alpha: 0.1)
@@ -1670,7 +2328,7 @@ class _CustomerConversationActionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: dark ? const Color(0xFF121418) : Colors.white,
+        color: dark ? _customerWorkspacePanelColor() : Colors.white,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: dark
@@ -1749,11 +2407,33 @@ class _CustomerPaymentCard extends StatelessWidget {
   const _CustomerPaymentCard({
     required this.invoice,
     required this.dueDateLabel,
+    this.onDismissNotification,
+    this.onViewQuotation,
+    this.onUploadProof,
+    this.onPayOnline,
+    this.onRefreshPaymentStatus,
+    this.onOpenReceipt,
+    this.uploadProgress,
+    this.uploadErrorDetails,
+    this.onDismissUploadError,
+    this.isUploadingProof = false,
+    this.isRefreshingStatus = false,
     this.dark = false,
   });
 
   final RequestInvoiceModel invoice;
   final String dueDateLabel;
+  final VoidCallback? onDismissNotification;
+  final VoidCallback? onViewQuotation;
+  final VoidCallback? onUploadProof;
+  final VoidCallback? onPayOnline;
+  final VoidCallback? onRefreshPaymentStatus;
+  final VoidCallback? onOpenReceipt;
+  final double? uploadProgress;
+  final String? uploadErrorDetails;
+  final VoidCallback? onDismissUploadError;
+  final bool isUploadingProof;
+  final bool isRefreshingStatus;
   final bool dark;
 
   @override
@@ -1775,19 +2455,34 @@ class _CustomerPaymentCard extends StatelessWidget {
       _ => (background: const Color(0xFFFFEFD2), foreground: AppTheme.ember),
     };
     final amountLabel = 'EUR ${invoice.amount.toStringAsFixed(2)}';
-    final subtitle = invoice.requiresCustomerProof
+    final subtitle = invoice.isApproved
+        ? (invoice.receiptUrl != null
+              ? 'Payment received. Your receipt is ready below.'
+              : 'Payment received. Staff has approved the quotation.')
+        : invoice.canCustomerPayOnline
+        ? 'Use the secure checkout button below. After payment, refresh the status here to pull the latest update.'
+        : invoice.requiresCustomerProof
         ? (invoice.isProofSubmitted
               ? 'Payment proof uploaded. Staff will review it here.'
-              : invoice.isApproved
-              ? 'Payment approved. Staff can now move the job into the start phase.'
               : invoice.isRejected
-              ? 'Your last proof was rejected. Use the proof button by the chat box to upload a new one.'
-              : 'Pay by ${invoice.paymentMethodLabel} and use the proof button by the chat box.')
+              ? 'Your last transfer proof was rejected. Upload a fresh proof once the correction is ready.'
+              : 'Pay by ${invoice.paymentMethodLabel} and upload your transfer proof here once the payment is sent.')
         : 'Payment option: ${invoice.paymentMethodLabel}.';
+    final outlineButtonStyle = OutlinedButton.styleFrom(
+      foregroundColor: dark ? Colors.white : AppTheme.ink,
+      backgroundColor: dark
+          ? Colors.white.withValues(alpha: 0.04)
+          : AppTheme.cobalt.withValues(alpha: 0.04),
+      side: BorderSide(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.12)
+            : AppTheme.cobalt.withValues(alpha: 0.18),
+      ),
+    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: dark ? const Color(0xFF121418) : Colors.white,
+        color: dark ? _customerWorkspacePanelColor() : Colors.white,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: dark
@@ -1804,7 +2499,7 @@ class _CustomerPaymentCard extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    'Invoice ${invoice.invoiceNumber}',
+                    'Quotation ${invoice.invoiceNumber}',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: dark ? Colors.white : null,
                       fontWeight: FontWeight.w700,
@@ -1830,6 +2525,38 @@ class _CustomerPaymentCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onDismissNotification != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: dark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : AppTheme.cobalt.withValues(alpha: 0.06),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: dark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : AppTheme.cobalt.withValues(alpha: 0.16),
+                      ),
+                    ),
+                    child: IconButton(
+                      tooltip: 'Dismiss notification',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 34,
+                        height: 34,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: onDismissNotification,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 18,
+                        color: dark
+                            ? Colors.white.withValues(alpha: 0.88)
+                            : AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 8),
@@ -1852,6 +2579,33 @@ class _CustomerPaymentCard extends StatelessWidget {
                     : AppTheme.ink.withValues(alpha: 0.74),
               ),
             ),
+            if (invoice.paidAt != null ||
+                invoice.paymentReference?.trim().isNotEmpty == true ||
+                invoice.receiptNumber?.trim().isNotEmpty == true) ...<Widget>[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (invoice.paidAt != null)
+                    _PaymentMetaChip(
+                      label:
+                          'Paid ${_CustomerRequestDateFormatter.dateTime(invoice.paidAt!)}',
+                      dark: dark,
+                    ),
+                  if (invoice.paymentReference?.trim().isNotEmpty == true)
+                    _PaymentMetaChip(
+                      label: 'Ref ${invoice.paymentReference!}',
+                      dark: dark,
+                    ),
+                  if (invoice.receiptNumber?.trim().isNotEmpty == true)
+                    _PaymentMetaChip(
+                      label: 'Receipt ${invoice.receiptNumber!}',
+                      dark: dark,
+                    ),
+                ],
+              ),
+            ],
             if (invoice.paymentInstructions.trim().isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
               Text(
@@ -1873,22 +2627,308 @@ class _CustomerPaymentCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (invoice.proof?.originalName.trim().isNotEmpty ==
-                true) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                'Latest proof: ${invoice.proof!.originalName}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: dark
-                      ? Colors.white.withValues(alpha: 0.68)
-                      : AppTheme.ink.withValues(alpha: 0.68),
-                ),
+            if (isUploadingProof) ...<Widget>[
+              const SizedBox(height: 12),
+              _CustomerUploadProgressCard(progress: uploadProgress, dark: dark),
+            ],
+            if (uploadErrorDetails?.trim().isNotEmpty == true) ...<Widget>[
+              const SizedBox(height: 12),
+              _CustomerUploadDebugCard(
+                details: uploadErrorDetails!,
+                dark: dark,
+                onDismiss: onDismissUploadError,
+              ),
+            ],
+            if (onPayOnline != null ||
+                onViewQuotation != null ||
+                onRefreshPaymentStatus != null ||
+                onUploadProof != null ||
+                onOpenReceipt != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: <Widget>[
+                  if (onViewQuotation != null)
+                    OutlinedButton.icon(
+                      onPressed: onViewQuotation,
+                      style: outlineButtonStyle,
+                      icon: const Icon(Icons.description_outlined),
+                      label: const Text('View quotation'),
+                    ),
+                  if (onPayOnline != null)
+                    FilledButton.icon(
+                      onPressed: onPayOnline,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.cobalt,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      label: const Text('Pay online'),
+                    ),
+                  if (onRefreshPaymentStatus != null)
+                    OutlinedButton.icon(
+                      onPressed: isRefreshingStatus
+                          ? null
+                          : onRefreshPaymentStatus,
+                      style: outlineButtonStyle,
+                      icon: Icon(
+                        isRefreshingStatus
+                            ? Icons.more_horiz_rounded
+                            : Icons.refresh_rounded,
+                      ),
+                      label: Text(
+                        isRefreshingStatus ? 'Refreshing...' : 'Refresh status',
+                      ),
+                    ),
+                  if (onUploadProof != null)
+                    FilledButton.tonalIcon(
+                      onPressed: isUploadingProof ? null : onUploadProof,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.ember.withValues(alpha: 0.18),
+                        foregroundColor: dark ? Colors.white : AppTheme.ink,
+                      ),
+                      icon: Icon(
+                        isUploadingProof
+                            ? Icons.more_horiz_rounded
+                            : Icons.upload_file_rounded,
+                      ),
+                      label: Text(
+                        isUploadingProof ? 'Uploading...' : 'Upload proof',
+                      ),
+                    ),
+                  if (onOpenReceipt != null)
+                    OutlinedButton.icon(
+                      onPressed: onOpenReceipt,
+                      style: outlineButtonStyle,
+                      icon: const Icon(Icons.receipt_long_rounded),
+                      label: const Text('View receipt'),
+                    ),
+                ],
               ),
             ],
           ],
         ),
       ),
     );
+  }
+}
+
+class _PaymentMetaChip extends StatelessWidget {
+  const _PaymentMetaChip({required this.label, required this.dark});
+
+  final String label;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.06)
+            : AppTheme.cobalt.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.1)
+              : AppTheme.cobalt.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: dark
+                ? Colors.white.withValues(alpha: 0.86)
+                : AppTheme.ink.withValues(alpha: 0.82),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerUploadProgressCard extends StatelessWidget {
+  const _CustomerUploadProgressCard({
+    required this.progress,
+    required this.dark,
+  });
+
+  final double? progress;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final progressLabel = progress == null
+        ? 'Preparing upload...'
+        : '${(progress! * 100).round()}% uploaded';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.05)
+            : AppTheme.cobalt.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.08)
+              : AppTheme.cobalt.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Uploading payment proof',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: dark ? Colors.white : AppTheme.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              progressLabel,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.72)
+                    : AppTheme.ink.withValues(alpha: 0.72),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                backgroundColor: dark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : AppTheme.cobalt.withValues(alpha: 0.12),
+                valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.ember),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerUploadDebugCard extends StatelessWidget {
+  const _CustomerUploadDebugCard({
+    required this.details,
+    required this.dark,
+    this.onDismiss,
+  });
+
+  final String details;
+  final bool dark;
+  final VoidCallback? onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF4B1F1B).withValues(alpha: dark ? 0.68 : 0.1),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: const Color(0xFFE38B79).withValues(alpha: 0.5),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                const Icon(Icons.bug_report_outlined, color: Color(0xFFFFB8A8)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Upload failed',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (onDismiss != null)
+                  IconButton(
+                    tooltip: 'Dismiss upload error',
+                    onPressed: onDismiss,
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+              ],
+            ),
+            SelectableText(
+              details,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.white.withValues(alpha: 0.92),
+                height: 1.4,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerPaymentDetailTile extends StatelessWidget {
+  const _CustomerPaymentDetailTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Colors.white.withValues(alpha: 0.62),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Colors.white,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerRequestDateFormatter {
+  static String dateTime(DateTime value) {
+    final localValue = value.toLocal();
+    final day = localValue.day.toString().padLeft(2, '0');
+    final month = localValue.month.toString().padLeft(2, '0');
+    final year = localValue.year.toString();
+    final hour = localValue.hour.toString().padLeft(2, '0');
+    final minute = localValue.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
   }
 }
 
@@ -2177,7 +3217,7 @@ class _InboxEmptyState extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: dark
-                ? Colors.white.withValues(alpha: 0.06)
+                ? Colors.white.withValues(alpha: 0.08)
                 : AppTheme.cobalt.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
@@ -2206,7 +3246,11 @@ class _InboxEmptyState extends StatelessWidget {
           onPressed: onCreateRequest,
           style: dark
               ? FilledButton.styleFrom(
-                  backgroundColor: AppTheme.cobalt.withValues(alpha: 0.18),
+                  backgroundColor: Color.lerp(
+                    AppTheme.cobalt,
+                    Colors.white,
+                    0.08,
+                  )!.withValues(alpha: 0.22),
                   foregroundColor: Colors.white,
                 )
               : null,
@@ -2214,6 +3258,34 @@ class _InboxEmptyState extends StatelessWidget {
           label: const Text('Create Request'),
         ),
       ],
+    );
+  }
+}
+
+class _WorkspaceBackdropGlow extends StatelessWidget {
+  const _WorkspaceBackdropGlow({required this.diameter, required this.color});
+
+  final double diameter;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: diameter,
+        height: diameter,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: color,
+              blurRadius: diameter * 0.4,
+              spreadRadius: diameter * 0.05,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

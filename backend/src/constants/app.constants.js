@@ -49,6 +49,7 @@ const REQUEST_MESSAGE_ACTIONS = Object.freeze({
 const PAYMENT_METHODS = Object.freeze({
   SEPA_BANK_TRANSFER: 'sepa_bank_transfer',
   CASH_ON_COMPLETION: 'cash_on_completion',
+  STRIPE_CHECKOUT: 'stripe_checkout',
 });
 
 const PAYMENT_REQUEST_STATUSES = Object.freeze({

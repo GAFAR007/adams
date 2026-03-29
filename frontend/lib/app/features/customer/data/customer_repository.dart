@@ -18,6 +18,40 @@ class CustomerRepository {
 
   final ApiClient _client;
 
+  String _normalizedUploadMimeType(String fileName, String mimeType) {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.isNotEmpty &&
+        normalizedMimeType != 'application/octet-stream') {
+      return normalizedMimeType;
+    }
+
+    final lowerCaseFileName = fileName.toLowerCase();
+    if (lowerCaseFileName.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lowerCaseFileName.endsWith('.jpg') ||
+        lowerCaseFileName.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lowerCaseFileName.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lowerCaseFileName.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (lowerCaseFileName.endsWith('.txt')) {
+      return 'text/plain';
+    }
+    if (lowerCaseFileName.endsWith('.doc')) {
+      return 'application/msword';
+    }
+    if (lowerCaseFileName.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+
+    return 'application/octet-stream';
+  }
+
   Future<List<ServiceRequestModel>> fetchRequests() async {
     final response = await _client.getJson('/customer/requests');
     final items = response['requests'] as List<dynamic>? ?? const <dynamic>[];
@@ -95,13 +129,15 @@ class CustomerRepository {
     required String mimeType,
     String? caption,
   }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+
     await _client.postFormData(
       '/customer/requests/$requestId/messages/attachment',
-      data: FormData.fromMap(<String, dynamic>{
+      createData: () => FormData.fromMap(<String, dynamic>{
         'attachment': MultipartFile.fromBytes(
           bytes,
           filename: fileName,
-          contentType: DioMediaType.parse(mimeType),
+          contentType: DioMediaType.parse(resolvedMimeType),
         ),
         if (caption != null && caption.trim().isNotEmpty)
           'caption': caption.trim(),
@@ -115,17 +151,21 @@ class CustomerRepository {
     required String fileName,
     required String mimeType,
     String? note,
+    void Function(int sent, int total)? onSendProgress,
   }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+
     await _client.postFormData(
       '/customer/requests/$requestId/invoice/proof',
-      data: FormData.fromMap(<String, dynamic>{
+      createData: () => FormData.fromMap(<String, dynamic>{
         'proof': MultipartFile.fromBytes(
           bytes,
           filename: fileName,
-          contentType: DioMediaType.parse(mimeType),
+          contentType: DioMediaType.parse(resolvedMimeType),
         ),
         if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
       }),
+      onSendProgress: onSendProgress,
     );
   }
 }

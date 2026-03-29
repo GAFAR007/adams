@@ -85,6 +85,16 @@ class StaffRepository {
     );
   }
 
+  Future<void> updateRequestAiControl({
+    required String requestId,
+    required bool enabled,
+  }) async {
+    await _client.patchJson(
+      '/staff/requests/$requestId/ai-control',
+      data: <String, dynamic>{'enabled': enabled},
+    );
+  }
+
   Future<void> sendInvoice({
     required String requestId,
     required double amount,

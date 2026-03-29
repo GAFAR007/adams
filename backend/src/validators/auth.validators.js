@@ -7,12 +7,13 @@
 const { body, param } = require('express-validator');
 
 const { USER_ROLES } = require('../constants/app.constants');
+const { optionalPhoneValidator } = require('./phone.validators');
 
 const customerRegisterValidator = [
   body('firstName').trim().notEmpty().withMessage('First name is required'),
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
   body('email').trim().isEmail().withMessage('A valid email is required'),
-  body('phone').optional().trim().isLength({ min: 7 }).withMessage('Phone number must be at least 7 characters'),
+  optionalPhoneValidator,
   body('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters long'),

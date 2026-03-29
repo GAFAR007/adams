@@ -23,6 +23,9 @@ const { User } = require('../models/user.model');
 const { AppError } = require('../utils/app-error');
 const { logInfo } = require('../utils/logger');
 const {
+  createHostedPaymentSession,
+} = require('../utils/payment-provider');
+const {
   buildAdminMessage,
   buildSystemMessage,
 } = require('../utils/request-chat');
@@ -33,8 +36,22 @@ const {
   createInvoiceRecord,
   invoiceNeedsCustomerProof,
 } = require('../utils/request-payment');
+const {
+  finalizeApprovedInvoice,
+  syncOnlineInvoicePaymentIfNeeded,
+} = require('../utils/request-payment-status');
 const { serializeServiceRequest, serializeStaffInvite, serializeUser } = require('../utils/serializers');
 const { buildStaffInviteLink } = require('./token.service');
+
+async function syncRequestCollectionInvoices(requests) {
+  await Promise.all(
+    requests.map(async (request) => {
+      if (await syncOnlineInvoicePaymentIfNeeded(request)) {
+        await request.save();
+      }
+    }),
+  );
+}
 
 async function getDashboard(logContext) {
   logInfo({
@@ -118,6 +135,8 @@ async function getDashboard(logContext) {
     intent: 'Confirm admin summary data is ready for response shaping',
   });
 
+  await syncRequestCollectionInvoices(recentRequests);
+
   const countsByStatus = statuses.reduce((accumulator, status, index) => {
     // WHY: Convert the positional count array into a keyed map so the frontend does not rely on ordering.
     accumulator[status] = statusCounts[index];
@@ -185,6 +204,8 @@ async function listRequests(filters, logContext) {
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .sort({ updatedAt: -1, createdAt: -1 })
     .limit(50);
+
+  await syncRequestCollectionInvoices(requests);
 
   logInfo({
     ...logContext,
@@ -337,6 +358,15 @@ async function createRequestInvoice(adminUser, requestId, payload, logContext) {
     actorUserId: adminUser.id,
     actorRole: USER_ROLES.ADMIN,
   });
+  const hostedPaymentSession = await createHostedPaymentSession({
+    invoice: request.invoice,
+    request,
+  });
+  if (hostedPaymentSession) {
+    request.invoice.paymentProvider = hostedPaymentSession.paymentProvider;
+    request.invoice.paymentLinkUrl = hostedPaymentSession.paymentLinkUrl;
+    request.invoice.providerPaymentId = hostedPaymentSession.providerPaymentId;
+  }
   request.messages.push(
     buildAdminMessage({
       adminId: adminUser.id,
@@ -421,12 +451,12 @@ async function reviewPaymentProof(adminUser, requestId, decision, reviewNote, lo
     actorRole: USER_ROLES.ADMIN,
     reviewNote,
   });
-  if (decision === 'approved' && request.status !== REQUEST_STATUSES.CLOSED) {
-    request.status = REQUEST_STATUSES.PENDING_START;
-  }
   request.messages.push(
     buildSystemMessage(buildProofReviewMessage(request.invoice, decision)),
   );
+  if (decision === 'approved') {
+    await finalizeApprovedInvoice(request);
+  }
   await request.save();
 
   logInfo({

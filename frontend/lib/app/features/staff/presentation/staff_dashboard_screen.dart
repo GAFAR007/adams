@@ -62,6 +62,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   final Map<String, double> _conversationScrollOffsetsByRequestId =
       <String, double>{};
   final Set<String> _attendingQueueIds = <String>{};
+  final Set<String> _updatingAiControlIds = <String>{};
   final Set<String> _sendingMessageIds = <String>{};
   final Set<String> _sendingInvoiceIds = <String>{};
   final Set<String> _reviewingPaymentProofIds = <String>{};
@@ -227,6 +228,56 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     }
   }
 
+  Future<void> _updateAiControl(
+    ServiceRequestModel request,
+    bool enabled, {
+    required String currentAvailability,
+  }) async {
+    if (request.assignedStaff == null || request.status == 'closed') {
+      return;
+    }
+
+    setState(() => _updatingAiControlIds.add(request.id));
+    debugPrint(
+      'StaffDashboardScreen._updateAiControl: setting ai control for ${request.id} to $enabled',
+    );
+
+    try {
+      await ref
+          .read(staffRepositoryProvider)
+          .updateRequestAiControl(requestId: request.id, enabled: enabled);
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return;
+      }
+
+      final isOnline = _isCurrentStaffOnline(currentAvailability);
+      final message = enabled
+          ? 'Naima is now covering this chat'
+          : isOnline
+          ? 'Direct staff chat resumed'
+          : 'Naima stays active while you are offline';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingAiControlIds.remove(request.id));
+      }
+    }
+  }
+
   Future<void> _sendCustomerUpdateRequest(ServiceRequestModel request) async {
     const updatePrompt =
         'Please review your request details and use the update button below to revise the address, preferred date or time, access instructions, or work scope so I can keep your request accurate.';
@@ -271,6 +322,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final draft = await showInvoiceDraftDialog(
       context,
       initialInvoice: request.invoice,
+      request: request,
     );
     if (draft == null) {
       return;
@@ -295,9 +347,9 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Invoice sent to customer')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Quotation sent to customer')),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -408,6 +460,127 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Opening proof is not supported here')),
+      );
+    }
+  }
+
+  bool _isLatestProofUploadMessage(
+    ServiceRequestModel request,
+    RequestMessageModel message,
+  ) {
+    if (!message.isCustomerUploadPaymentProof) {
+      return false;
+    }
+
+    final latestProofUrl = request.invoice?.proof?.relativeUrl ?? '';
+    final messageProofUrl = message.attachment?.relativeUrl ?? '';
+    if (latestProofUrl.isEmpty || messageProofUrl.isEmpty) {
+      return false;
+    }
+
+    return latestProofUrl == messageProofUrl;
+  }
+
+  Widget? _buildStaffThreadMessageAction(
+    ServiceRequestModel request,
+    RequestMessageModel message,
+  ) {
+    final invoice = request.invoice;
+    if (invoice == null || !_isLatestProofUploadMessage(request, message)) {
+      return null;
+    }
+
+    final invoiceStatus = invoice.status;
+    final statusConfig = switch (invoiceStatus) {
+      paymentRequestStatusApproved => (
+        label: 'Payment approved',
+        background: const Color(0xFF1D4930),
+        foreground: const Color(0xFFDDF7E4),
+      ),
+      paymentRequestStatusRejected => (
+        label: 'Payment rejected',
+        background: const Color(0xFF5A2A21),
+        foreground: const Color(0xFFFFE0DA),
+      ),
+      _ => (
+        label: 'Pending review',
+        background: const Color(0xFF193446),
+        foreground: const Color(0xFFDFF3FF),
+      ),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: statusConfig.background,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                child: Text(
+                  statusConfig.label,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: statusConfig.foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            if (invoiceStatus == paymentRequestStatusProofSubmitted)
+              FilledButton.tonalIcon(
+                onPressed: _reviewingPaymentProofIds.contains(request.id)
+                    ? null
+                    : () => _reviewPaymentProof(request, decision: 'approved'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.pine.withValues(alpha: 0.18),
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.verified_rounded, size: 18),
+                label: Text(
+                  _reviewingPaymentProofIds.contains(request.id)
+                      ? 'Saving...'
+                      : 'Approve payment',
+                ),
+              ),
+            if (invoiceStatus == paymentRequestStatusProofSubmitted)
+              OutlinedButton.icon(
+                onPressed: _reviewingPaymentProofIds.contains(request.id)
+                    ? null
+                    : () => _reviewPaymentProof(request, decision: 'rejected'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.04),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                icon: const Icon(Icons.close_rounded, size: 18),
+                label: const Text('Reject proof'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openReceipt(ServiceRequestModel request) async {
+    final receiptUrl = request.invoice?.receiptUrl;
+    if (receiptUrl == null || receiptUrl.isEmpty) {
+      return;
+    }
+
+    final opened = await openExternalUrl(receiptUrl);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Opening receipt is not supported here')),
       );
     }
   }
@@ -788,6 +961,15 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
   bool _isCurrentStaffOnline(String currentAvailability) =>
       currentAvailability == 'online';
+
+  bool _isAiCoverActive(
+    ServiceRequestModel request,
+    String currentAvailability,
+  ) {
+    return request.assignedStaff != null &&
+        (request.aiControlEnabled ||
+            !_isCurrentStaffOnline(currentAvailability));
+  }
 
   String _filterLabel(_StaffInboxFilter filter) {
     return switch (filter) {
@@ -1201,6 +1383,9 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final actionsTopSpacing = isCompact ? 6 - (compactCollapse * 2) : 8.0;
     final titleColor = dark ? Colors.white : null;
     final metaColor = dark ? Colors.white.withValues(alpha: 0.68) : null;
+    final subtitleColor = dark
+        ? Colors.white.withValues(alpha: 0.54)
+        : metaColor;
     final backForeground = dark ? Colors.white.withValues(alpha: 0.84) : null;
 
     return AnimatedContainer(
@@ -1248,25 +1433,52 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       )
                     else
                       const Spacer(),
-                    const SizedBox(width: 10),
-                    StatusChip(status: request.status, compact: true),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  request.contactFullName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontSize: titleFontSize,
-                    fontWeight: FontWeight.w700,
-                    color: titleColor,
-                  ),
+                SizedBox(height: 8 - (compactCollapse * 2)),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            request.contactFullName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  fontSize: titleFontSize,
+                                  fontWeight: FontWeight.w700,
+                                  color: titleColor,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${request.serviceLabel} · ${request.city}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: subtitleColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _buildConversationHeaderStatusPill(
+                      context,
+                      request.status,
+                      compact: true,
+                      dark: dark,
+                    ),
+                  ],
                 ),
-                SizedBox(height: actionsTopSpacing),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                SizedBox(height: actionsTopSpacing + 2),
+                Row(
                   children: <Widget>[
                     PresenceChip(
                       label: isOnline ? 'Online' : 'Offline',
@@ -1274,6 +1486,17 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       dark: dark,
                       compact: true,
                     ),
+                    if (!isWaiting && request.status != 'closed') ...<Widget>[
+                      const SizedBox(width: 8),
+                      _buildAiControlToggle(
+                        context,
+                        request: request,
+                        currentAvailability: currentAvailability,
+                        compact: true,
+                        dark: dark,
+                      ),
+                    ],
+                    const Spacer(),
                     _buildCompactHeaderButton(
                       context,
                       onPressed: onOpenProfile,
@@ -1281,6 +1504,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       label: '',
                       dark: dark,
                     ),
+                    const SizedBox(width: 8),
                     if (isWaiting)
                       _buildCompactHeaderButton(
                         context,
@@ -1337,6 +1561,13 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                             isOnline: isOnline,
                             dark: dark,
                           ),
+                          if (!isWaiting && request.status != 'closed')
+                            _buildAiControlToggle(
+                              context,
+                              request: request,
+                              currentAvailability: currentAvailability,
+                              dark: dark,
+                            ),
                           OutlinedButton.icon(
                             onPressed: onOpenProfile,
                             style: OutlinedButton.styleFrom(
@@ -1388,10 +1619,217 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                StatusChip(status: request.status),
+                _buildConversationHeaderStatusPill(
+                  context,
+                  request.status,
+                  dark: dark,
+                ),
               ],
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildConversationHeaderStatusPill(
+    BuildContext context,
+    String status, {
+    bool compact = false,
+    bool dark = false,
+  }) {
+    if (!dark) {
+      return StatusChip(status: status, compact: compact);
+    }
+
+    final colors = switch (status) {
+      'submitted' => (
+        background: Colors.white.withValues(alpha: 0.08),
+        border: Colors.white.withValues(alpha: 0.12),
+        foreground: Colors.white.withValues(alpha: 0.86),
+      ),
+      'under_review' => (
+        background: AppTheme.ember.withValues(alpha: 0.18),
+        border: AppTheme.ember.withValues(alpha: 0.34),
+        foreground: const Color(0xFFFFE3C5),
+      ),
+      'assigned' => (
+        background: AppTheme.cobalt.withValues(alpha: 0.2),
+        border: AppTheme.cobalt.withValues(alpha: 0.4),
+        foreground: const Color(0xFFD7E6FF),
+      ),
+      'quoted' => (
+        background: AppTheme.ember.withValues(alpha: 0.18),
+        border: AppTheme.ember.withValues(alpha: 0.34),
+        foreground: const Color(0xFFFFE3C5),
+      ),
+      'appointment_confirmed' => (
+        background: AppTheme.pine.withValues(alpha: 0.18),
+        border: AppTheme.pine.withValues(alpha: 0.34),
+        foreground: const Color(0xFFD6F0E7),
+      ),
+      'pending_start' => (
+        background: const Color(0xFF5B4C8A).withValues(alpha: 0.24),
+        border: const Color(0xFF8772C9).withValues(alpha: 0.36),
+        foreground: const Color(0xFFE6DDFF),
+      ),
+      'project_started' => (
+        background: const Color(0xFF174D65).withValues(alpha: 0.24),
+        border: const Color(0xFF2C87B3).withValues(alpha: 0.36),
+        foreground: const Color(0xFFD8F2FF),
+      ),
+      'work_done' => (
+        background: AppTheme.pine.withValues(alpha: 0.2),
+        border: AppTheme.pine.withValues(alpha: 0.36),
+        foreground: const Color(0xFFD6F0E7),
+      ),
+      'closed' => (
+        background: Colors.white.withValues(alpha: 0.08),
+        border: Colors.white.withValues(alpha: 0.12),
+        foreground: Colors.white.withValues(alpha: 0.78),
+      ),
+      _ => (
+        background: Colors.white.withValues(alpha: 0.08),
+        border: Colors.white.withValues(alpha: 0.12),
+        foreground: Colors.white.withValues(alpha: 0.86),
+      ),
+    };
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 12,
+          vertical: compact ? 6 : 7,
+        ),
+        child: Text(
+          requestStatusLabelFor(status),
+          style:
+              (compact
+                      ? Theme.of(context).textTheme.labelSmall
+                      : Theme.of(context).textTheme.labelMedium)
+                  ?.copyWith(
+                    color: colors.foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiControlToggle(
+    BuildContext context, {
+    required ServiceRequestModel request,
+    required String currentAvailability,
+    bool compact = false,
+    bool dark = false,
+  }) {
+    final isOnline = _isCurrentStaffOnline(currentAvailability);
+    final isForcedOn = !isOnline;
+    final isActive = _isAiCoverActive(request, currentAvailability);
+    final isUpdating = _updatingAiControlIds.contains(request.id);
+    final allowInteraction =
+        !isForcedOn && !isUpdating && request.status != 'closed';
+    final darkCompactBackground = isActive
+        ? AppTheme.cobalt.withValues(alpha: 0.18)
+        : const Color(0xFF182438);
+    final backgroundColor = dark
+        ? compact
+              ? darkCompactBackground
+              : Colors.white.withValues(alpha: isActive ? 0.08 : 0.04)
+        : Colors.white;
+    final borderColor = dark
+        ? compact
+              ? (isActive
+                    ? AppTheme.cobalt.withValues(alpha: 0.38)
+                    : Colors.white.withValues(alpha: 0.08))
+              : Colors.white.withValues(alpha: isActive ? 0.18 : 0.1)
+        : AppTheme.clay.withValues(alpha: 0.78);
+    final textColor = dark ? Colors.white : AppTheme.ink;
+    final iconColor = dark && compact
+        ? (isActive
+              ? const Color(0xFFD8E7FF)
+              : Colors.white.withValues(alpha: 0.72))
+        : isActive
+        ? AppTheme.cobalt
+        : textColor.withValues(alpha: 0.64);
+
+    return Tooltip(
+      message: isForcedOn
+          ? 'Naima stays active while you are offline'
+          : isActive
+          ? 'Naima is covering this chat'
+          : 'Turn Naima on to cover this chat',
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 160),
+        opacity: isUpdating ? 0.72 : 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(compact ? 18 : 14),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 6 : 10,
+              vertical: compact ? 2 : 5,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: compact ? 14 : 16,
+                  color: iconColor,
+                ),
+                if (!compact) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Text(
+                    'Naima',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: textColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                SizedBox(
+                  width: compact ? 30 : 36,
+                  child: Transform.scale(
+                    scale: compact ? 0.66 : 0.82,
+                    child: Switch.adaptive(
+                      value: isActive,
+                      onChanged: allowInteraction
+                          ? (bool value) => _updateAiControl(
+                              request,
+                              value,
+                              currentAvailability: currentAvailability,
+                            )
+                          : null,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      activeThumbColor: dark && compact
+                          ? Colors.white
+                          : AppTheme.cobalt,
+                      activeTrackColor: dark && compact
+                          ? AppTheme.cobalt.withValues(alpha: 0.88)
+                          : AppTheme.cobalt.withValues(alpha: 0.42),
+                      inactiveThumbColor: dark
+                          ? Colors.white.withValues(alpha: 0.88)
+                          : AppTheme.ink,
+                      inactiveTrackColor: dark && compact
+                          ? Colors.white.withValues(alpha: 0.16)
+                          : dark
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : AppTheme.clay.withValues(alpha: 0.42),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1407,8 +1845,16 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final foregroundColor = filled
         ? Colors.white
         : dark
-        ? Colors.white
+        ? Colors.white.withValues(alpha: 0.9)
         : AppTheme.ink;
+    final backgroundColor = filled
+        ? AppTheme.cobalt
+        : dark
+        ? AppTheme.cobalt.withValues(alpha: 0.14)
+        : Colors.white;
+    final borderColor = dark
+        ? AppTheme.cobalt.withValues(alpha: filled ? 0 : 0.24)
+        : AppTheme.clay.withValues(alpha: 0.82);
 
     return SizedBox(
       height: 34,
@@ -1416,18 +1862,8 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         onPressed: onPressed,
         style: TextButton.styleFrom(
           foregroundColor: foregroundColor,
-          backgroundColor: filled
-              ? AppTheme.cobalt
-              : dark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.white,
-          side: filled
-              ? null
-              : BorderSide(
-                  color: dark
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : AppTheme.clay.withValues(alpha: 0.82),
-                ),
+          backgroundColor: backgroundColor,
+          side: filled ? null : BorderSide(color: borderColor),
           minimumSize: Size(label.isEmpty ? 34 : 0, 34),
           padding: EdgeInsets.symmetric(
             horizontal: label.isEmpty ? 8 : 10,
@@ -1541,6 +1977,12 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                             : () {
                                 Navigator.of(modalContext).pop();
                                 _openPaymentProof(request);
+                              },
+                        onOpenReceipt: request.invoice?.receiptUrl == null
+                            ? null
+                            : () {
+                                Navigator.of(modalContext).pop();
+                                _openReceipt(request);
                               },
                         onApprovePaymentProof:
                             request.invoice?.isProofSubmitted == true
@@ -1952,6 +2394,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final isSending = _sendingMessageIds.contains(request.id);
     final composerEnabled =
         request.assignedStaff != null && request.status != 'closed';
+    final aiCoverActive = _isAiCoverActive(request, currentAvailability);
     final isCompact = MediaQuery.sizeOf(context).width < 720;
     final collapseProgress = isCompact
         ? ((_conversationScrollOffsetsByRequestId[request.id] ?? 0) / 88).clamp(
@@ -2023,6 +2466,8 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                           viewerRole: 'staff',
                           dark: true,
                           emptyLabel: 'No thread messages yet.',
+                          messageActionBuilder: (RequestMessageModel message) =>
+                              _buildStaffThreadMessageAction(request, message),
                         ),
                       ),
                     ),
@@ -2032,9 +2477,13 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                     child: RequestMessageComposer(
                       controller: controller,
                       hintText: composerEnabled
-                          ? 'Reply to the customer here'
+                          ? aiCoverActive
+                                ? 'Reply here to take the chat back from Naima'
+                                : 'Reply to the customer here'
                           : 'Attend the queue before replying',
-                      buttonLabel: 'Send reply',
+                      buttonLabel: aiCoverActive
+                          ? 'Send and resume'
+                          : 'Send reply',
                       isSubmitting: isSending,
                       dark: true,
                       isEnabled: composerEnabled,
@@ -2106,7 +2555,36 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
-        title: Text('Staff Queue · ${authState.user?.fullName ?? 'Staff'}'),
+        titleSpacing: 16,
+        title: Text.rich(
+          TextSpan(
+            children: <InlineSpan>[
+              TextSpan(
+                text: 'Staff Queue',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.96),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              TextSpan(
+                text: ' · ',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.4),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              TextSpan(
+                text: authState.user?.fullName ?? 'Staff',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: <Widget>[
           IconButton(
             tooltip: 'Logout',
@@ -2397,6 +2875,7 @@ class _StaffChatActionTray extends StatelessWidget {
     required this.onAskCustomerUpdate,
     required this.onSendInvoice,
     required this.onOpenPaymentProof,
+    required this.onOpenReceipt,
     required this.onApprovePaymentProof,
     required this.onRejectPaymentProof,
   });
@@ -2408,6 +2887,7 @@ class _StaffChatActionTray extends StatelessWidget {
   final VoidCallback onAskCustomerUpdate;
   final VoidCallback onSendInvoice;
   final VoidCallback? onOpenPaymentProof;
+  final VoidCallback? onOpenReceipt;
   final VoidCallback? onApprovePaymentProof;
   final VoidCallback? onRejectPaymentProof;
 
@@ -2440,7 +2920,7 @@ class _StaffChatActionTray extends StatelessWidget {
             Text(
               invoice == null
                   ? 'Keep the request moving without leaving the chat.'
-                  : 'Invoice ${invoice.invoiceNumber} is ${statusLabel.toLowerCase()}.',
+                  : 'Quotation ${invoice.invoiceNumber} is ${statusLabel.toLowerCase()}.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Colors.white.withValues(alpha: 0.62),
               ),
@@ -2476,7 +2956,9 @@ class _StaffChatActionTray extends StatelessWidget {
                   ),
                   icon: const Icon(Icons.receipt_long_rounded),
                   label: Text(
-                    isSendingInvoice ? 'Sending invoice...' : 'Send invoice',
+                    isSendingInvoice
+                        ? 'Sending quotation...'
+                        : 'Send quotation',
                   ),
                 ),
                 if (onOpenPaymentProof != null)
@@ -2491,6 +2973,19 @@ class _StaffChatActionTray extends StatelessWidget {
                     ),
                     icon: const Icon(Icons.attach_file_rounded),
                     label: const Text('View proof'),
+                  ),
+                if (onOpenReceipt != null)
+                  OutlinedButton.icon(
+                    onPressed: onOpenReceipt,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.04),
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.receipt_long_rounded),
+                    label: const Text('View receipt'),
                   ),
                 if (onApprovePaymentProof != null)
                   FilledButton.icon(

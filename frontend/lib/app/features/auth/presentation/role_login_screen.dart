@@ -47,6 +47,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _hasAppliedInitialQuickFill = false;
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -361,7 +362,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                                   const SizedBox(height: 16),
                                   TextField(
                                     controller: _passwordController,
-                                    obscureText: true,
+                                    obscureText: !_isPasswordVisible,
                                     autofillHints: const <String>[
                                       AutofillHints.password,
                                     ],
@@ -369,8 +370,24 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                                     enableSuggestions: false,
                                     textInputAction: TextInputAction.done,
                                     onSubmitted: (_) => _submit(),
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       labelText: 'Password',
+                                      suffixIcon: IconButton(
+                                        tooltip: _isPasswordVisible
+                                            ? 'Hide password'
+                                            : 'Show password',
+                                        onPressed: () {
+                                          setState(() {
+                                            _isPasswordVisible =
+                                                !_isPasswordVisible;
+                                          });
+                                        },
+                                        icon: Icon(
+                                          _isPasswordVisible
+                                              ? Icons.visibility_off_rounded
+                                              : Icons.visibility_rounded,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 14),

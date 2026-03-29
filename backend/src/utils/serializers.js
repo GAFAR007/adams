@@ -250,10 +250,117 @@ function serializeRequestInvoice(invoice) {
     status: invoice.status || null,
     sentAt: invoice.sentAt?.toISOString?.() || null,
     sentByRole: invoice.sentByRole || null,
+    paymentProvider: invoice.paymentProvider || null,
+    paymentLinkUrl: invoice.paymentLinkUrl || null,
+    providerPaymentId: invoice.providerPaymentId || null,
+    paymentReference: invoice.paymentReference || null,
+    paidAt: invoice.paidAt?.toISOString?.() || null,
+    providerReceiptUrl: invoice.providerReceiptUrl || null,
+    receiptNumber: invoice.receiptNumber || null,
+    receiptRelativeUrl: invoice.receiptRelativeUrl || null,
+    receiptIssuedAt: invoice.receiptIssuedAt?.toISOString?.() || null,
     reviewedAt: invoice.reviewedAt?.toISOString?.() || null,
     reviewedByRole: invoice.reviewedByRole || null,
     reviewNote: invoice.reviewNote || '',
     proof: serializePaymentProof(invoice.proof),
+  };
+}
+
+function serializeLocalizedText(value) {
+  if (!value) {
+    return {
+      en: '',
+      de: '',
+    };
+  }
+
+  return {
+    en: value.en || '',
+    de: value.de || '',
+  };
+}
+
+function serializeBookServiceLabel(value) {
+  const serialized = serializeLocalizedText(value);
+  const english = serialized.en.trim().toLowerCase();
+  const german = serialized.de.trim().toLowerCase();
+
+  // WHY: Migrate legacy "create account" copy into the new public booking language without requiring an immediate manual DB edit.
+  if (
+    english === 'create customer account' ||
+    german === 'kundenkonto erstellen'
+  ) {
+    return {
+      en: 'Book a service',
+      de: 'Service buchen',
+    };
+  }
+
+  return serialized;
+}
+
+function serializeCompanyProfile(profile) {
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    id: String(profile._id || profile.id),
+    siteKey: profile.siteKey || 'default',
+    companyName: profile.companyName || '',
+    legalName: profile.legalName || '',
+    category: serializeLocalizedText(profile.category),
+    tagline: serializeLocalizedText(profile.tagline),
+    heroTitle: serializeLocalizedText(profile.heroTitle),
+    heroSubtitle: serializeLocalizedText(profile.heroSubtitle),
+    adminLoginLabel: serializeLocalizedText(profile.adminLoginLabel),
+    createAccountLabel: serializeBookServiceLabel(profile.createAccountLabel),
+    customerLoginLabel: serializeLocalizedText(profile.customerLoginLabel),
+    staffLoginLabel: serializeLocalizedText(profile.staffLoginLabel),
+    heroPanelTitle: serializeLocalizedText(profile.heroPanelTitle),
+    heroPanelSubtitle: serializeLocalizedText(profile.heroPanelSubtitle),
+    heroBullets: Array.isArray(profile.heroBullets)
+      ? profile.heroBullets.map(serializeLocalizedText)
+      : [],
+    servicesTitle: serializeLocalizedText(profile.servicesTitle),
+    serviceCardSubtitle: serializeLocalizedText(profile.serviceCardSubtitle),
+    serviceLabels: Array.isArray(profile.serviceLabels)
+      ? profile.serviceLabels.map((service) => {
+          return {
+            key: service.key || '',
+            label: serializeLocalizedText(service.label),
+          };
+        })
+      : [],
+    howItWorksTitle: serializeLocalizedText(profile.howItWorksTitle),
+    howItWorksSteps: Array.isArray(profile.howItWorksSteps)
+      ? profile.howItWorksSteps.map((step) => {
+          return {
+            title: serializeLocalizedText(step.title),
+            subtitle: serializeLocalizedText(step.subtitle),
+          };
+        })
+      : [],
+    contactSectionTitle: serializeLocalizedText(profile.contactSectionTitle),
+    contactSectionSubtitle: serializeLocalizedText(
+      profile.contactSectionSubtitle,
+    ),
+    serviceAreaLabel: serializeLocalizedText(profile.serviceAreaLabel),
+    serviceAreaText: serializeLocalizedText(profile.serviceAreaText),
+    contact: {
+      addressLine1: profile.contact?.addressLine1 || '',
+      city: profile.contact?.city || '',
+      postalCode: profile.contact?.postalCode || '',
+      country: profile.contact?.country || '',
+      phone: profile.contact?.phone || '',
+      secondaryPhone: profile.contact?.secondaryPhone || '',
+      email: profile.contact?.email || '',
+      hoursLabel: serializeLocalizedText(profile.contact?.hoursLabel),
+    },
+    primaryColorHex: profile.primaryColorHex || '#1B4D8C',
+    accentColorHex: profile.accentColorHex || '#CE7B37',
+    createdAt: profile.createdAt?.toISOString?.() || null,
+    updatedAt: profile.updatedAt?.toISOString?.() || null,
   };
 }
 
@@ -289,6 +396,7 @@ function serializeServiceRequest(request) {
     },
     customer,
     assignedStaff,
+    aiControlEnabled: Boolean(request.aiControlEnabled),
     queueEnteredAt: request.queueEnteredAt?.toISOString?.() || null,
     attendedAt: request.attendedAt?.toISOString?.() || null,
     projectStartedAt: request.projectStartedAt?.toISOString?.() || null,
@@ -304,8 +412,10 @@ function serializeServiceRequest(request) {
 }
 
 module.exports = {
+  serializeCompanyProfile,
   serializeInternalChatMessage,
   serializeInternalChatThread,
+  serializeLocalizedText,
   serializeRequestMessage,
   serializeServiceRequest,
   serializeStaffInvite,

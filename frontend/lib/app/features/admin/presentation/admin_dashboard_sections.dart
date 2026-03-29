@@ -436,6 +436,7 @@ class AdminRequestDetailPane extends StatelessWidget {
     required this.isAssigning,
     required this.onSendInvoice,
     required this.onOpenPaymentProof,
+    required this.onOpenReceipt,
     required this.onApprovePaymentProof,
     required this.onRejectPaymentProof,
     required this.isSendingInvoice,
@@ -453,6 +454,7 @@ class AdminRequestDetailPane extends StatelessWidget {
   final bool isAssigning;
   final VoidCallback? onSendInvoice;
   final VoidCallback? onOpenPaymentProof;
+  final VoidCallback? onOpenReceipt;
   final VoidCallback? onApprovePaymentProof;
   final VoidCallback? onRejectPaymentProof;
   final bool isSendingInvoice;
@@ -551,15 +553,15 @@ class AdminRequestDetailPane extends StatelessWidget {
         return _AdminSheetCard(
           title: 'Billing',
           subtitle:
-              'Create the invoice, review proof, and resolve payment actions here.',
+              'Create the quotation, review proof, and resolve payment actions here.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Text(
                 request.invoice != null
-                    ? 'Invoice ${request.invoice!.invoiceNumber} is ${requestStatusLabelFor(request.invoice!.status)}.'
-                    : 'Create and send an invoice directly from this request detail pane.',
+                    ? 'Quotation ${request.invoice!.invoiceNumber} is ${requestStatusLabelFor(request.invoice!.status)}.'
+                    : 'Create and send a quotation directly from this request detail pane.',
                 style: Theme.of(modalContext).textTheme.bodyMedium?.copyWith(
                   color: Colors.white.withValues(alpha: 0.72),
                   height: 1.35,
@@ -578,7 +580,9 @@ class AdminRequestDetailPane extends StatelessWidget {
                     ),
                     icon: const Icon(Icons.receipt_long_rounded),
                     label: Text(
-                      isSendingInvoice ? 'Sending invoice...' : 'Send invoice',
+                      isSendingInvoice
+                          ? 'Sending quotation...'
+                          : 'Send quotation',
                     ),
                   ),
                   if (onOpenPaymentProof != null)
@@ -593,6 +597,19 @@ class AdminRequestDetailPane extends StatelessWidget {
                       ),
                       icon: const Icon(Icons.attach_file_rounded),
                       label: const Text('View proof'),
+                    ),
+                  if (onOpenReceipt != null)
+                    OutlinedButton.icon(
+                      onPressed: onOpenReceipt,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.04),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.receipt_long_rounded),
+                      label: const Text('View receipt'),
                     ),
                   if (onApprovePaymentProof != null)
                     FilledButton.icon(

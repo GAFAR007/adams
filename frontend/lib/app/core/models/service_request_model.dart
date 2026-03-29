@@ -11,14 +11,17 @@ const String requestMessageActionCustomerUploadPaymentProof =
     'customer_upload_payment_proof';
 const String paymentMethodSepaBankTransfer = 'sepa_bank_transfer';
 const String paymentMethodCashOnCompletion = 'cash_on_completion';
+const String paymentMethodStripeCheckout = 'stripe_checkout';
 const String paymentRequestStatusSent = 'sent';
 const String paymentRequestStatusProofSubmitted = 'proof_submitted';
 const String paymentRequestStatusApproved = 'approved';
 const String paymentRequestStatusRejected = 'rejected';
+const String staffAvailabilityOnline = 'online';
 
 String paymentMethodLabelFor(String paymentMethod) {
   return switch (paymentMethod) {
     paymentMethodCashOnCompletion => 'Cash on completion',
+    paymentMethodStripeCheckout => 'Online card / wallet payment',
     _ => 'SEPA bank transfer',
   };
 }
@@ -193,6 +196,15 @@ class RequestInvoiceModel {
     required this.status,
     required this.sentAt,
     required this.sentByRole,
+    required this.paymentProvider,
+    required this.paymentLinkUrl,
+    required this.providerPaymentId,
+    required this.paymentReference,
+    required this.paidAt,
+    required this.providerReceiptUrl,
+    required this.receiptNumber,
+    required this.receiptRelativeUrl,
+    required this.receiptIssuedAt,
     required this.reviewedAt,
     required this.reviewedByRole,
     required this.reviewNote,
@@ -209,6 +221,15 @@ class RequestInvoiceModel {
   final String status;
   final DateTime? sentAt;
   final String? sentByRole;
+  final String? paymentProvider;
+  final String? paymentLinkUrl;
+  final String? providerPaymentId;
+  final String? paymentReference;
+  final DateTime? paidAt;
+  final String? providerReceiptUrl;
+  final String? receiptNumber;
+  final String? receiptRelativeUrl;
+  final DateTime? receiptIssuedAt;
   final DateTime? reviewedAt;
   final String? reviewedByRole;
   final String reviewNote;
@@ -217,12 +238,21 @@ class RequestInvoiceModel {
   String get paymentMethodLabel => paymentMethodLabelFor(paymentMethod);
   bool get requiresCustomerProof =>
       paymentMethod == paymentMethodSepaBankTransfer;
+  bool get supportsOnlineCheckout =>
+      paymentMethod == paymentMethodStripeCheckout;
   bool get isSent => status == paymentRequestStatusSent;
   bool get isProofSubmitted => status == paymentRequestStatusProofSubmitted;
   bool get isApproved => status == paymentRequestStatusApproved;
   bool get isRejected => status == paymentRequestStatusRejected;
   bool get canCustomerUploadProof =>
       requiresCustomerProof && (isSent || isRejected);
+  bool get canCustomerPayOnline =>
+      supportsOnlineCheckout &&
+      !isApproved &&
+      (paymentLinkUrl?.trim().isNotEmpty ?? false);
+  String? get receiptFileUrl =>
+      _resolveAbsoluteFileUrl(receiptRelativeUrl ?? '');
+  String? get receiptUrl => receiptFileUrl ?? providerReceiptUrl;
 
   factory RequestInvoiceModel.fromJson(Map<String, dynamic> json) {
     final amountValue = json['amount'];
@@ -238,6 +268,17 @@ class RequestInvoiceModel {
       status: json['status'] as String? ?? '',
       sentAt: DateTime.tryParse(json['sentAt'] as String? ?? ''),
       sentByRole: json['sentByRole'] as String?,
+      paymentProvider: json['paymentProvider'] as String?,
+      paymentLinkUrl: json['paymentLinkUrl'] as String?,
+      providerPaymentId: json['providerPaymentId'] as String?,
+      paymentReference: json['paymentReference'] as String?,
+      paidAt: DateTime.tryParse(json['paidAt'] as String? ?? ''),
+      providerReceiptUrl: json['providerReceiptUrl'] as String?,
+      receiptNumber: json['receiptNumber'] as String?,
+      receiptRelativeUrl: json['receiptRelativeUrl'] as String?,
+      receiptIssuedAt: DateTime.tryParse(
+        json['receiptIssuedAt'] as String? ?? '',
+      ),
       reviewedAt: DateTime.tryParse(json['reviewedAt'] as String? ?? ''),
       reviewedByRole: json['reviewedByRole'] as String?,
       reviewNote: json['reviewNote'] as String? ?? '',
@@ -268,6 +309,7 @@ class ServiceRequestModel {
     required this.contactPhone,
     required this.customer,
     required this.assignedStaff,
+    required this.aiControlEnabled,
     required this.queueEnteredAt,
     required this.attendedAt,
     required this.projectStartedAt,
@@ -295,6 +337,7 @@ class ServiceRequestModel {
   final String contactPhone;
   final RequestParty? customer;
   final RequestParty? assignedStaff;
+  final bool aiControlEnabled;
   final DateTime? queueEnteredAt;
   final DateTime? attendedAt;
   final DateTime? projectStartedAt;
@@ -309,6 +352,12 @@ class ServiceRequestModel {
 
   RequestMessageModel? get latestMessage =>
       messages.isEmpty ? null : messages.last;
+
+  bool get isAssignedStaffOnline =>
+      assignedStaff?.staffAvailability == staffAvailabilityOnline;
+
+  bool get isAiInControl =>
+      assignedStaff == null || aiControlEnabled || !isAssignedStaffOnline;
 
   DateTime? get latestActivityAt {
     DateTime? latest;
@@ -370,6 +419,7 @@ class ServiceRequestModel {
       assignedStaff: json['assignedStaff'] is Map<String, dynamic>
           ? RequestParty.fromJson(json['assignedStaff'] as Map<String, dynamic>)
           : null,
+      aiControlEnabled: json['aiControlEnabled'] as bool? ?? false,
       queueEnteredAt: DateTime.tryParse(
         json['queueEnteredAt'] as String? ?? '',
       ),

@@ -261,6 +261,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final draft = await showInvoiceDraftDialog(
       context,
       initialInvoice: request.invoice,
+      request: request,
     );
     if (draft == null) {
       return;
@@ -286,9 +287,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Invoice sent to customer')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Quotation sent to customer')),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -400,6 +401,20 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Opening proof is not supported here')),
+      );
+    }
+  }
+
+  Future<void> _openReceipt(ServiceRequestModel request) async {
+    final receiptUrl = request.invoice?.receiptUrl;
+    if (receiptUrl == null || receiptUrl.isEmpty) {
+      return;
+    }
+
+    final opened = await openExternalUrl(receiptUrl);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Opening receipt is not supported here')),
       );
     }
   }
@@ -666,6 +681,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                           selectedRequest?.invoice?.proof?.fileUrl == null
                           ? null
                           : () => _openPaymentProof(selectedRequest!),
+                      onOpenReceipt:
+                          selectedRequest?.invoice?.receiptUrl == null
+                          ? null
+                          : () => _openReceipt(selectedRequest!),
                       onApprovePaymentProof:
                           selectedRequest?.invoice?.isProofSubmitted == true
                           ? () => _reviewPaymentProof(
@@ -725,6 +744,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     selectedRequest.invoice?.proof?.fileUrl == null
                     ? null
                     : () => _openPaymentProof(selectedRequest),
+                onOpenReceipt: selectedRequest.invoice?.receiptUrl == null
+                    ? null
+                    : () => _openReceipt(selectedRequest),
                 onApprovePaymentProof:
                     selectedRequest.invoice?.isProofSubmitted == true
                     ? () => _reviewPaymentProof(
