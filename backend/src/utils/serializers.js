@@ -355,6 +355,8 @@ function serializeCompanyProfile(profile) {
       phone: profile.contact?.phone || '',
       secondaryPhone: profile.contact?.secondaryPhone || '',
       email: profile.contact?.email || '',
+      instagramUrl: profile.contact?.instagramUrl || '',
+      facebookUrl: profile.contact?.facebookUrl || '',
       hoursLabel: serializeLocalizedText(profile.contact?.hoursLabel),
     },
     primaryColorHex: profile.primaryColorHex || '#1B4D8C',

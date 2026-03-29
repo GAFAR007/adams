@@ -95,6 +95,16 @@ const companyContactSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    instagramUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    facebookUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     hoursLabel: {
       type: localizedTextSchema,
       required: true,

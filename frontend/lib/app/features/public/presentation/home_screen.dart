@@ -3,13 +3,18 @@
 /// HOW: Fetch the public company profile, keep only the language toggle in local UI state, and map backend data into a branded hero plus grouped accordion sections.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/models/public_company_profile.dart';
+import '../../../shared/utils/external_url_opener.dart';
 import '../../../theme/app_theme.dart';
 import '../data/public_repository.dart';
 import 'public_site_shell.dart';
@@ -28,6 +33,10 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   late _PublicLanguage _language;
+  final ValueNotifier<_StoryMotionState> _storyMotion = ValueNotifier(
+    const _StoryMotionState(),
+  );
+  double _lastScrollPixels = 0;
 
   @override
   void initState() {
@@ -37,8 +46,62 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         : _PublicLanguage.english;
   }
 
+  @override
+  void dispose() {
+    _storyMotion.dispose();
+    super.dispose();
+  }
+
   String _text(LocalizedText value) {
     return value.resolve(_language == _PublicLanguage.german ? 'de' : 'en');
+  }
+
+  Future<void> _copyText(String text, String successMessage) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(successMessage),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _openUri(Uri uri, {bool sameTab = false}) async {
+    final launched = await openExternalUrl(uri.toString(), sameTab: sameTab);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_labels.linkOpenFailedMessage),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Uri _buildPhoneUri(String phone) {
+    return Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'\s+'), ''));
+  }
+
+  Uri _buildMailUri(String email) {
+    return Uri(scheme: 'mailto', path: email);
+  }
+
+  Uri _buildMapsUri(PublicContactInfo contact) {
+    final query = _fullAddress(contact);
+    return Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}',
+    );
+  }
+
+  Uri _buildSocialUri(String value, String fallback) {
+    final normalized = value.trim();
+    return Uri.parse(normalized.isNotEmpty ? normalized : fallback);
   }
 
   _UiLabels get _labels {
@@ -46,32 +109,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _PublicLanguage.english => const _UiLabels(
         addressLabel: 'Address',
         phoneLabel: 'Phone',
-        secondaryPhoneLabel: 'Secondary phone',
         emailLabel: 'Email',
         hoursLabel: 'Hours',
-        legalNameLabel: 'Legal name',
-        categoryLabel: 'Category',
-        companyPanelTitle: 'About the company',
-        companyPanelSubtitle:
-            'Use the grouped sections below to browse public business details without turning the page into a long wall of cards.',
-        contactPanelTitle: 'Business, contact and legal info',
-        contactPanelSubtitle:
-            'Structured like a cleaner contact and impressum layout, with the important details tucked into dropdowns.',
-        companyAccordionTitle: 'Company details',
-        contactAccordionTitle: 'Direct contact',
-        coverageAccordionTitle: 'Availability and coverage',
+        companyPanelTitle: 'About us',
+        companyPanelSubtitle: '',
         servicesPanelSubtitle:
             'Open a service to see how requests start and where the team operates.',
-        processPanelSubtitle:
-            'The public request flow stays visible, but now in compact dropdown sections.',
         quickContactTitle: 'Reach us directly',
         quickContactSubtitle:
             'Phone, email, address, and opening information in one place.',
         serviceAreaLabel: 'Service area',
-        footerBadge: 'Backend-driven company profile',
-        footerTitle: 'Structured public info for CL Facility Management',
-        footerSubtitle:
-            'Company details, contact data, services, and process steps are rendered from MongoDB instead of duplicated frontend constants.',
         heroFastResponseLabel: 'Fast response',
         heroAudienceLabel: 'Homes and businesses',
         utilityQuoteLabel: 'Free quote and fast response',
@@ -82,37 +129,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         legalNavLabel: 'Legal',
         contactNavLabel: 'Contact',
         sectionsMenuLabel: 'Menu',
+        copyActionLabel: 'Copy',
+        callActionLabel: 'Call',
+        mapActionLabel: 'Open map',
+        emailActionLabel: 'Send email',
+        instagramActionLabel: 'Instagram',
+        facebookActionLabel: 'Facebook',
+        phoneCopiedMessage: 'Phone number copied',
+        emailCopiedMessage: 'Email copied',
+        addressCopiedMessage: 'Address copied',
+        linkOpenFailedMessage: 'Could not open the link on this device.',
       ),
       _PublicLanguage.german => const _UiLabels(
         addressLabel: 'Adresse',
         phoneLabel: 'Telefon',
-        secondaryPhoneLabel: 'Weitere Nummer',
         emailLabel: 'E-Mail',
         hoursLabel: 'Öffnungszeiten',
-        legalNameLabel: 'Firmenname',
-        categoryLabel: 'Kategorie',
-        companyPanelTitle: 'Über das Unternehmen',
-        companyPanelSubtitle:
-            'Mit den gruppierten Bereichen bleiben die öffentlichen Firmendaten übersichtlich statt als lange Kartenwand dargestellt.',
-        contactPanelTitle: 'Kontakt, Firmendaten und Impressum',
-        contactPanelSubtitle:
-            'Die wichtigsten öffentlichen Angaben sind in klaren Dropdown-Bereichen gruppiert.',
-        companyAccordionTitle: 'Unternehmensdaten',
-        contactAccordionTitle: 'Direkter Kontakt',
-        coverageAccordionTitle: 'Erreichbarkeit und Einsatzgebiet',
+        companyPanelTitle: 'Über uns',
+        companyPanelSubtitle: '',
         servicesPanelSubtitle:
             'Öffne eine Leistung, um Ablauf und Einsatzgebiet kompakt zu sehen.',
-        processPanelSubtitle:
-            'Der öffentliche Anfrageablauf bleibt sichtbar, jetzt aber in kompakten Dropdown-Bereichen.',
         quickContactTitle: 'Direkt erreichbar',
         quickContactSubtitle:
             'Telefon, E-Mail, Adresse und Öffnungszeiten an einem Ort.',
         serviceAreaLabel: 'Einsatzgebiet',
-        footerBadge: 'Backend-gesteuertes Unternehmensprofil',
-        footerTitle:
-            'Strukturierte öffentliche Angaben für CL Facility Management',
-        footerSubtitle:
-            'Firmendaten, Kontakt, Leistungen und Ablauf werden aus MongoDB gerendert statt als Frontend-Konstanten dupliziert.',
         heroFastResponseLabel: 'Schnelle Antwort',
         heroAudienceLabel: 'Privat und Gewerbe',
         utilityQuoteLabel: 'Kostenlose Anfrage und schnelle Antwort',
@@ -123,12 +163,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         legalNavLabel: 'Rechtliches',
         contactNavLabel: 'Kontakt',
         sectionsMenuLabel: 'Menü',
+        copyActionLabel: 'Kopieren',
+        callActionLabel: 'Anrufen',
+        mapActionLabel: 'Karte öffnen',
+        emailActionLabel: 'E-Mail senden',
+        instagramActionLabel: 'Instagram',
+        facebookActionLabel: 'Facebook',
+        phoneCopiedMessage: 'Telefonnummer kopiert',
+        emailCopiedMessage: 'E-Mail kopiert',
+        addressCopiedMessage: 'Adresse kopiert',
+        linkOpenFailedMessage:
+            'Der Link konnte auf diesem Gerät nicht geöffnet werden.',
       ),
     };
   }
 
   String _routeWithLanguage(String path) {
     return _language == _PublicLanguage.german ? '$path?lang=de' : path;
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0 || notification.metrics.axis != Axis.vertical) {
+      return false;
+    }
+
+    final pixels = notification.metrics.pixels;
+    final delta = pixels - _lastScrollPixels;
+    _lastScrollPixels = pixels;
+
+    var direction = _storyMotion.value.direction;
+    var momentum = _storyMotion.value.momentum;
+
+    if (notification is ScrollUpdateNotification) {
+      if (delta > 0.35) {
+        direction = _StoryScrollDirection.down;
+      } else if (delta < -0.35) {
+        direction = _StoryScrollDirection.up;
+      }
+      momentum = (delta.abs() / 36).clamp(0.0, 1.0);
+    } else if (notification is ScrollEndNotification) {
+      direction = _StoryScrollDirection.idle;
+      momentum = 0;
+    }
+
+    final progress = (pixels / 420).clamp(0.0, 1.4);
+    final current = _storyMotion.value;
+    if ((current.progress - progress).abs() < 0.01 &&
+        (current.momentum - momentum).abs() < 0.02 &&
+        current.direction == direction) {
+      return false;
+    }
+
+    _storyMotion.value = _StoryMotionState(
+      progress: progress,
+      momentum: momentum,
+      direction: direction,
+    );
+    return false;
   }
 
   @override
@@ -160,80 +251,136 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final accentColor = _colorFromHex(profile.accentColorHex, AppTheme.ember);
     final heroSurfaceColor = Color.lerp(primaryColor, AppTheme.ink, 0.34)!;
     final homeVisual = publicPageVisualForKey('home');
+    final fullAddress = _fullAddress(profile.contact);
+    final mapsUri = _buildMapsUri(profile.contact);
+    final phoneUri = _buildPhoneUri(profile.contact.phone);
+    final emailUri = _buildMailUri(profile.contact.email);
+    final instagramUri = _buildSocialUri(
+      profile.contact.instagramUrl,
+      'https://www.instagram.com/',
+    );
+    final facebookUri = _buildSocialUri(
+      profile.contact.facebookUrl,
+      'https://www.facebook.com/',
+    );
 
     final quickContactRows = <_InfoLineData>[
       _InfoLineData(
         label: _labels.addressLabel,
-        value: _fullAddress(profile.contact),
+        value: fullAddress,
         icon: Icons.location_on_rounded,
+        compact: false,
+        allowWrap: true,
+        onTap: () {
+          _openUri(mapsUri);
+        },
+        actions: <_InfoLineAction>[
+          _InfoLineAction(
+            icon: Icons.copy_rounded,
+            tooltip: _labels.copyActionLabel,
+            onTap: () {
+              _copyText(fullAddress, _labels.addressCopiedMessage);
+            },
+          ),
+          _InfoLineAction(
+            icon: Icons.map_outlined,
+            tooltip: _labels.mapActionLabel,
+            onTap: () {
+              _openUri(mapsUri);
+            },
+          ),
+        ],
       ),
       _InfoLineData(
         label: _labels.phoneLabel,
         value: profile.contact.phone,
         icon: Icons.call_rounded,
+        compact: true,
+        allowWrap: true,
+        onTap: () {
+          _openUri(phoneUri, sameTab: true);
+        },
+        actions: <_InfoLineAction>[
+          _InfoLineAction(
+            icon: Icons.copy_rounded,
+            tooltip: _labels.copyActionLabel,
+            onTap: () {
+              _copyText(profile.contact.phone, _labels.phoneCopiedMessage);
+            },
+          ),
+          _InfoLineAction(
+            icon: Icons.call_outlined,
+            tooltip: _labels.callActionLabel,
+            onTap: () {
+              _openUri(phoneUri, sameTab: true);
+            },
+          ),
+        ],
       ),
       _InfoLineData(
         label: _labels.emailLabel,
         value: profile.contact.email,
         icon: Icons.mail_rounded,
+        compact: false,
+        allowWrap: true,
+        onTap: () {
+          _openUri(emailUri, sameTab: true);
+        },
+        actions: <_InfoLineAction>[
+          _InfoLineAction(
+            icon: Icons.copy_rounded,
+            tooltip: _labels.copyActionLabel,
+            onTap: () {
+              _copyText(profile.contact.email, _labels.emailCopiedMessage);
+            },
+          ),
+          _InfoLineAction(
+            icon: Icons.send_outlined,
+            tooltip: _labels.emailActionLabel,
+            onTap: () {
+              _openUri(emailUri, sameTab: true);
+            },
+          ),
+        ],
       ),
       _InfoLineData(
         label: _labels.hoursLabel,
         value: _text(profile.contact.hoursLabel),
         icon: Icons.schedule_rounded,
+        compact: true,
+        allowWrap: false,
+      ),
+    ];
+    final socialLinks = <_SocialLinkData>[
+      _SocialLinkData(
+        icon: Icons.facebook_rounded,
+        tooltip: _labels.facebookActionLabel,
+        backgroundColor: const Color(0xFFDCE8FB),
+        foregroundColor: const Color(0xFF1877F2),
+        onTap: () {
+          _openUri(facebookUri);
+        },
+      ),
+      _SocialLinkData(
+        icon: Icons.camera_alt_outlined,
+        tooltip: _labels.instagramActionLabel,
+        backgroundColor: const Color(0xFFE5ECF8),
+        foregroundColor: AppTheme.cobalt,
+        onTap: () {
+          _openUri(instagramUri);
+        },
       ),
     ];
 
-    final businessRows = <_InfoPairData>[
-      _InfoPairData(
-        label: _labels.legalNameLabel,
-        value: profile.legalName.isNotEmpty
-            ? profile.legalName
-            : profile.companyName,
-      ),
-      _InfoPairData(
-        label: _labels.categoryLabel,
-        value: _text(profile.category),
-      ),
-      _InfoPairData(
-        label: _labels.serviceAreaLabel,
-        value: _text(profile.serviceAreaText),
-      ),
-    ];
-
-    final directContactRows = <_InfoPairData>[
-      _InfoPairData(
-        label: _labels.addressLabel,
-        value: _fullAddress(profile.contact),
-      ),
-      _InfoPairData(label: _labels.phoneLabel, value: profile.contact.phone),
-      if (profile.contact.secondaryPhone.isNotEmpty)
-        _InfoPairData(
-          label: _labels.secondaryPhoneLabel,
-          value: profile.contact.secondaryPhone,
-        ),
-      _InfoPairData(label: _labels.emailLabel, value: profile.contact.email),
-    ];
-
-    final availabilityRows = <_InfoPairData>[
-      _InfoPairData(
-        label: _labels.hoursLabel,
-        value: _text(profile.contact.hoursLabel),
-      ),
-      _InfoPairData(
-        label: _labels.serviceAreaLabel,
-        value: _text(profile.serviceAreaText),
-      ),
-    ];
-
-    final serviceCards = profile.serviceLabels
+    final serviceCardBuilders = profile.serviceLabels
         .asMap()
         .entries
         .map((entry) {
           final service = entry.value;
           final visual = publicServiceVisualForKey(service.key);
+          final route = _routeWithLanguage('/services/${service.key}');
 
-          return PublicReveal(
+          return (BuildContext cardContext) => PublicReveal(
             delay: Duration(milliseconds: 80 + (entry.key * 90)),
             child: PublicServiceFeatureCard(
               heroTag: publicServiceHeroTag(service.key),
@@ -251,23 +398,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               actionLabel: _language == _PublicLanguage.german
                   ? 'Leistung öffnen'
                   : 'Open service',
-              onTap: () =>
-                  context.go(_routeWithLanguage('/services/${service.key}')),
+              onTap: () => cardContext.go(route),
             ),
           );
         })
         .toList(growable: false);
-
-    final howItWorksItems = profile.howItWorksSteps
-        .map(
-          (step) => _AccordionItemData(
-            title: _text(step.title),
-            subtitle: _text(step.subtitle),
-            icon: Icons.timeline_rounded,
-            rows: const <_InfoPairData>[],
-          ),
-        )
-        .toList(growable: false);
+    final storyTitle = LocalizedText(
+      en: 'Reliable support for clean, welcoming spaces',
+      de: 'Verlässliche Unterstützung für saubere, einladende Räume',
+    );
+    final storySubtitle = LocalizedText(
+      en: '${profile.companyName} helps homes, offices, and shared buildings in ${profile.serviceAreaText.en.isNotEmpty ? profile.serviceAreaText.en : profile.serviceAreaText.de} stay clean, presentable, and ready for everyday use.',
+      de: '${profile.companyName} unterstützt Wohnungen, Büros und Gemeinschaftsflächen in ${profile.serviceAreaText.de.isNotEmpty ? profile.serviceAreaText.de : profile.serviceAreaText.en} dabei, sauber, gepflegt und im Alltag einsatzbereit zu bleiben.',
+    );
+    final storyBullets = <LocalizedText>[
+      LocalizedText(
+        en: 'Regular and one-off cleaning arranged around your property, schedule, and day-to-day needs.',
+        de: 'Regelmäßige und einmalige Reinigungen, abgestimmt auf Objekt, Zeitplan und den Alltag vor Ort.',
+      ),
+      LocalizedText(
+        en: 'Direct contact for quotes, scheduling, and practical service questions when you need them.',
+        de: 'Direkter Kontakt für Angebote, Terminabstimmung und praktische Servicefragen, wenn Sie Unterstützung brauchen.',
+      ),
+      LocalizedText(
+        en: 'Local support across ${profile.serviceAreaText.en.isNotEmpty ? profile.serviceAreaText.en : profile.serviceAreaText.de} for homes, offices, windows, and shared spaces.',
+        de: 'Lokale Unterstützung in ${profile.serviceAreaText.de.isNotEmpty ? profile.serviceAreaText.de : profile.serviceAreaText.en} für Wohnungen, Büros, Fenster und Gemeinschaftsflächen.',
+      ),
+    ];
 
     return Scaffold(
       backgroundColor: AppTheme.sand,
@@ -284,64 +441,126 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             stops: const <double>[0, 0.34, 1],
           ),
         ),
-        child: CustomScrollView(
-          slivers: <Widget>[
-            SliverToBoxAdapter(
-              child: _HeroShell(
-                primaryColor: primaryColor,
-                accentColor: accentColor,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      24,
-                      isCompact ? 24 : 28,
-                      24,
-                      isCompact ? 48 : 60,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        PublicReveal(
-                          delay: const Duration(milliseconds: 50),
-                          child: _HeroTopBar(
-                            theme: theme,
-                            isCompact: isCompact,
-                            language: _language,
-                            companyName: profile.companyName,
-                            adminLoginLabel: _text(profile.adminLoginLabel),
-                            utilityQuoteLabel: _labels.utilityQuoteLabel,
-                            utilityAvailabilityLabel:
-                                _labels.utilityAvailabilityLabel,
-                            homeNavLabel: _labels.homeNavLabel,
-                            aboutNavLabel: _labels.aboutNavLabel,
-                            servicesNavLabel: _labels.servicesNavLabel,
-                            legalNavLabel: _labels.legalNavLabel,
-                            contactNavLabel: _labels.contactNavLabel,
-                            sectionsMenuLabel: _labels.sectionsMenuLabel,
-                            serviceItems: profile.serviceLabels,
-                            homePath: _routeWithLanguage('/'),
-                            aboutPath: _routeWithLanguage('/about'),
-                            servicesPath: _routeWithLanguage('/services'),
-                            legalPath: _routeWithLanguage('/legal'),
-                            contactPath: _routeWithLanguage('/contact'),
-                            routeForService: (serviceKey) =>
-                                _routeWithLanguage('/services/$serviceKey'),
-                            onLanguageChanged: (nextLanguage) {
-                              setState(() => _language = nextLanguage);
-                            },
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: CustomScrollView(
+            slivers: <Widget>[
+              SliverToBoxAdapter(
+                child: _HeroShell(
+                  primaryColor: primaryColor,
+                  accentColor: accentColor,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        24,
+                        isCompact ? 24 : 28,
+                        24,
+                        isCompact ? 48 : 60,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          PublicReveal(
+                            delay: const Duration(milliseconds: 50),
+                            child: _HeroTopBar(
+                              theme: theme,
+                              isCompact: isCompact,
+                              language: _language,
+                              companyName: profile.companyName,
+                              adminLoginLabel: _text(profile.adminLoginLabel),
+                              utilityQuoteLabel: _labels.utilityQuoteLabel,
+                              utilityAvailabilityLabel:
+                                  _labels.utilityAvailabilityLabel,
+                              homeNavLabel: _labels.homeNavLabel,
+                              aboutNavLabel: _labels.aboutNavLabel,
+                              servicesNavLabel: _labels.servicesNavLabel,
+                              legalNavLabel: _labels.legalNavLabel,
+                              contactNavLabel: _labels.contactNavLabel,
+                              sectionsMenuLabel: _labels.sectionsMenuLabel,
+                              serviceItems: profile.serviceLabels,
+                              homePath: _routeWithLanguage('/'),
+                              aboutPath: _routeWithLanguage('/about'),
+                              servicesPath: _routeWithLanguage('/services'),
+                              legalPath: _routeWithLanguage('/legal'),
+                              contactPath: _routeWithLanguage('/contact'),
+                              routeForService: (serviceKey) =>
+                                  _routeWithLanguage('/services/$serviceKey'),
+                              onLanguageChanged: (nextLanguage) {
+                                setState(() => _language = nextLanguage);
+                              },
+                            ),
                           ),
-                        ),
-                        SizedBox(height: isCompact ? 28 : 40),
-                        if (isWide)
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Expanded(
-                                flex: 6,
-                                child: PublicReveal(
+                          SizedBox(height: isCompact ? 28 : 40),
+                          if (isWide)
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Expanded(
+                                  flex: 6,
+                                  child: PublicReveal(
+                                    delay: const Duration(milliseconds: 140),
+                                    beginOffset: const Offset(-0.03, 0.02),
+                                    child: _HeroCopy(
+                                      category: _text(profile.category),
+                                      tagline: _text(profile.tagline),
+                                      heroTitle: _text(profile.heroTitle),
+                                      heroSubtitle: _text(profile.heroSubtitle),
+                                      bookServicePath: _routeWithLanguage(
+                                        '/book-service',
+                                      ),
+                                      createAccountLabel: _text(
+                                        profile.createAccountLabel,
+                                      ),
+                                      customerLoginLabel: _text(
+                                        profile.customerLoginLabel,
+                                      ),
+                                      staffLoginLabel: _text(
+                                        profile.staffLoginLabel,
+                                      ),
+                                      fastResponseLabel:
+                                          _labels.heroFastResponseLabel,
+                                      audienceLabel: _labels.heroAudienceLabel,
+                                      coverageLabel: _text(
+                                        profile.serviceAreaText,
+                                      ),
+                                      theme: theme,
+                                      accentColor: accentColor,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 24),
+                                Expanded(
+                                  flex: 4,
+                                  child: PublicReveal(
+                                    delay: const Duration(milliseconds: 210),
+                                    beginOffset: const Offset(0.03, 0.02),
+                                    child: _QuickContactPanel(
+                                      title: _labels.quickContactTitle,
+                                      subtitle: _labels.quickContactSubtitle,
+                                      rows: quickContactRows,
+                                      socialLinks: socialLinks,
+                                      areaLabel: _text(
+                                        profile.serviceAreaLabel,
+                                      ),
+                                      areaValue: _text(profile.serviceAreaText),
+                                      primaryColor: primaryColor,
+                                      accentColor: accentColor,
+                                      heroImageUrl: homeVisual.imageUrl,
+                                      visualEyebrow: homeVisual.kicker.resolve(
+                                        languageCode,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          else
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                PublicReveal(
                                   delay: const Duration(milliseconds: 140),
-                                  beginOffset: const Offset(-0.03, 0.02),
                                   child: _HeroCopy(
                                     category: _text(profile.category),
                                     tagline: _text(profile.tagline),
@@ -369,17 +588,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     accentColor: accentColor,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                flex: 4,
-                                child: PublicReveal(
+                                const SizedBox(height: 20),
+                                PublicReveal(
                                   delay: const Duration(milliseconds: 210),
-                                  beginOffset: const Offset(0.03, 0.02),
                                   child: _QuickContactPanel(
                                     title: _labels.quickContactTitle,
                                     subtitle: _labels.quickContactSubtitle,
                                     rows: quickContactRows,
+                                    socialLinks: socialLinks,
                                     areaLabel: _text(profile.serviceAreaLabel),
                                     areaValue: _text(profile.serviceAreaText),
                                     primaryColor: primaryColor,
@@ -390,221 +606,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          )
-                        else
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              PublicReveal(
-                                delay: const Duration(milliseconds: 140),
-                                child: _HeroCopy(
-                                  category: _text(profile.category),
-                                  tagline: _text(profile.tagline),
-                                  heroTitle: _text(profile.heroTitle),
-                                  heroSubtitle: _text(profile.heroSubtitle),
-                                  bookServicePath: _routeWithLanguage(
-                                    '/book-service',
-                                  ),
-                                  createAccountLabel: _text(
-                                    profile.createAccountLabel,
-                                  ),
-                                  customerLoginLabel: _text(
-                                    profile.customerLoginLabel,
-                                  ),
-                                  staffLoginLabel: _text(
-                                    profile.staffLoginLabel,
-                                  ),
-                                  fastResponseLabel:
-                                      _labels.heroFastResponseLabel,
-                                  audienceLabel: _labels.heroAudienceLabel,
-                                  coverageLabel: _text(profile.serviceAreaText),
-                                  theme: theme,
-                                  accentColor: accentColor,
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              PublicReveal(
-                                delay: const Duration(milliseconds: 210),
-                                child: _QuickContactPanel(
-                                  title: _labels.quickContactTitle,
-                                  subtitle: _labels.quickContactSubtitle,
-                                  rows: quickContactRows,
-                                  areaLabel: _text(profile.serviceAreaLabel),
-                                  areaValue: _text(profile.serviceAreaText),
-                                  primaryColor: primaryColor,
-                                  accentColor: accentColor,
-                                  heroImageUrl: homeVisual.imageUrl,
-                                  visualEyebrow: homeVisual.kicker.resolve(
-                                    languageCode,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            SliverToBoxAdapter(
-              child: Transform.translate(
-                offset: const Offset(0, -28),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      _ServiceShowcaseSection(
-                        title: _text(profile.servicesTitle),
-                        subtitle: _labels.servicesPanelSubtitle,
-                        cards: serviceCards,
-                      ),
-                      const SizedBox(height: 28),
-                      if (isWide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: PublicReveal(
-                                delay: const Duration(milliseconds: 110),
-                                child: _ContentPanel(
-                                  title: _labels.companyPanelTitle,
-                                  subtitle: _labels.companyPanelSubtitle,
-                                  child: _StoryPanel(
-                                    heroPanelTitle: _text(
-                                      profile.heroPanelTitle,
-                                    ),
-                                    heroPanelSubtitle: _text(
-                                      profile.heroPanelSubtitle,
-                                    ),
-                                    bullets: profile.heroBullets
-                                        .map(_text)
-                                        .toList(growable: false),
-                                    companyName: profile.companyName,
-                                    serviceArea: _text(profile.serviceAreaText),
-                                    accentColor: accentColor,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              child: PublicReveal(
-                                delay: const Duration(milliseconds: 180),
-                                child: _DropdownSectionPanel(
-                                  title: _labels.contactPanelTitle,
-                                  subtitle: _labels.contactPanelSubtitle,
-                                  accentColor: accentColor,
-                                  items: <_AccordionItemData>[
-                                    _AccordionItemData(
-                                      title: _labels.companyAccordionTitle,
-                                      subtitle: profile.legalName.isNotEmpty
-                                          ? profile.legalName
-                                          : profile.companyName,
-                                      icon: Icons.business_center_rounded,
-                                      rows: businessRows,
-                                    ),
-                                    _AccordionItemData(
-                                      title: _labels.contactAccordionTitle,
-                                      subtitle: profile.contact.phone,
-                                      icon: Icons.contact_phone_rounded,
-                                      rows: directContactRows,
-                                    ),
-                                    _AccordionItemData(
-                                      title: _labels.coverageAccordionTitle,
-                                      subtitle: _text(
-                                        profile.contact.hoursLabel,
-                                      ),
-                                      icon: Icons.public_rounded,
-                                      rows: availabilityRows,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      else ...<Widget>[
+              SliverToBoxAdapter(
+                child: Transform.translate(
+                  offset: const Offset(0, -28),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        _ServiceShowcaseSection(
+                          title: _text(profile.servicesTitle),
+                          subtitle: _labels.servicesPanelSubtitle,
+                          cardBuilders: serviceCardBuilders,
+                        ),
+                        const SizedBox(height: 28),
                         PublicReveal(
                           delay: const Duration(milliseconds: 110),
                           child: _ContentPanel(
                             title: _labels.companyPanelTitle,
                             subtitle: _labels.companyPanelSubtitle,
                             child: _StoryPanel(
-                              heroPanelTitle: _text(profile.heroPanelTitle),
-                              heroPanelSubtitle: _text(
-                                profile.heroPanelSubtitle,
-                              ),
-                              bullets: profile.heroBullets
-                                  .map(_text)
-                                  .toList(growable: false),
+                              heroPanelTitle: storyTitle,
+                              heroPanelSubtitle: storySubtitle,
+                              bullets: storyBullets,
                               companyName: profile.companyName,
-                              serviceArea: _text(profile.serviceAreaText),
+                              serviceArea: profile.serviceAreaText,
+                              primaryColor: primaryColor,
                               accentColor: accentColor,
+                              motionListenable: _storyMotion,
                             ),
                           ),
                         ),
-                        const SizedBox(height: 20),
-                        PublicReveal(
-                          delay: const Duration(milliseconds: 180),
-                          child: _DropdownSectionPanel(
-                            title: _labels.contactPanelTitle,
-                            subtitle: _labels.contactPanelSubtitle,
-                            accentColor: accentColor,
-                            items: <_AccordionItemData>[
-                              _AccordionItemData(
-                                title: _labels.companyAccordionTitle,
-                                subtitle: profile.legalName.isNotEmpty
-                                    ? profile.legalName
-                                    : profile.companyName,
-                                icon: Icons.business_center_rounded,
-                                rows: businessRows,
-                              ),
-                              _AccordionItemData(
-                                title: _labels.contactAccordionTitle,
-                                subtitle: profile.contact.phone,
-                                icon: Icons.contact_phone_rounded,
-                                rows: directContactRows,
-                              ),
-                              _AccordionItemData(
-                                title: _labels.coverageAccordionTitle,
-                                subtitle: _text(profile.contact.hoursLabel),
-                                icon: Icons.public_rounded,
-                                rows: availabilityRows,
-                              ),
-                            ],
-                          ),
-                        ),
                       ],
-                      const SizedBox(height: 20),
-                      PublicReveal(
-                        delay: const Duration(milliseconds: 240),
-                        child: _DropdownSectionPanel(
-                          title: _text(profile.howItWorksTitle),
-                          subtitle: _labels.processPanelSubtitle,
-                          accentColor: accentColor,
-                          items: howItWorksItems,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      PublicReveal(
-                        delay: const Duration(milliseconds: 300),
-                        child: _FooterCallout(
-                          badge: _labels.footerBadge,
-                          title: _labels.footerTitle,
-                          subtitle: _labels.footerSubtitle,
-                          accentColor: accentColor,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -988,19 +1035,30 @@ class _MainNavigationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currentPath = GoRouterState.of(context).uri.path;
     final brand = Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Container(
-          width: 52,
-          height: 52,
+          width: isCompact ? 52 : 56,
+          height: isCompact ? 52 : 56,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: <Color>[Color(0xFF1D5EC2), Color(0xFF7BC6F4)],
+            gradient: LinearGradient(
+              colors: <Color>[
+                Color.lerp(AppTheme.cobalt, AppTheme.ink, 0.12)!,
+                Color.lerp(AppTheme.cobalt, Colors.white, 0.28)!,
+              ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(18),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: AppTheme.cobalt.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
           ),
           child: const Icon(
             Icons.cleaning_services_rounded,
@@ -1009,25 +1067,35 @@ class _MainNavigationBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 14),
-        Text(
-          companyName,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            color: AppTheme.ink,
-            fontWeight: FontWeight.w700,
+        Flexible(
+          child: Text(
+            companyName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: AppTheme.ink,
+              fontWeight: FontWeight.w700,
+              fontSize: isCompact ? 18 : 20,
+              letterSpacing: -0.4,
+            ),
           ),
         ),
       ],
     );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 16 : 18,
+        vertical: isCompact ? 14 : 16,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
+        color: Colors.white.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: AppTheme.ink.withValues(alpha: 0.18),
-            blurRadius: 26,
+            color: AppTheme.ink.withValues(alpha: 0.14),
+            blurRadius: 28,
             offset: const Offset(0, 18),
           ),
         ],
@@ -1061,51 +1129,48 @@ class _MainNavigationBar extends StatelessWidget {
                 const SizedBox(height: 14),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: FilledButton.tonal(
+                  child: _AdminEntryButton(
+                    label: adminLoginLabel,
                     onPressed: () => context.go('/admin/login'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
-                      foregroundColor: AppTheme.cobalt,
-                    ),
-                    child: Text(adminLoginLabel),
                   ),
                 ),
               ],
             )
           : Row(
               children: <Widget>[
-                brand,
-                const Spacer(),
-                _DesktopMainNav(
-                  language: language,
-                  homeNavLabel: homeNavLabel,
-                  aboutNavLabel: aboutNavLabel,
-                  servicesNavLabel: servicesNavLabel,
-                  legalNavLabel: legalNavLabel,
-                  contactNavLabel: contactNavLabel,
-                  serviceItems: serviceItems,
-                  homePath: homePath,
-                  aboutPath: aboutPath,
-                  servicesPath: servicesPath,
-                  legalPath: legalPath,
-                  contactPath: contactPath,
-                  routeForService: routeForService,
+                Flexible(
+                  flex: 5,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: brand,
+                  ),
                 ),
-                const SizedBox(width: 16),
-                FilledButton.tonal(
-                  onPressed: () => context.go('/admin/login'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
-                    foregroundColor: AppTheme.cobalt,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                const SizedBox(width: 22),
+                Expanded(
+                  flex: 7,
+                  child: Center(
+                    child: _DesktopMainNav(
+                      language: language,
+                      currentPath: currentPath,
+                      homeNavLabel: homeNavLabel,
+                      aboutNavLabel: aboutNavLabel,
+                      servicesNavLabel: servicesNavLabel,
+                      legalNavLabel: legalNavLabel,
+                      contactNavLabel: contactNavLabel,
+                      serviceItems: serviceItems,
+                      homePath: homePath,
+                      aboutPath: aboutPath,
+                      servicesPath: servicesPath,
+                      legalPath: legalPath,
+                      contactPath: contactPath,
+                      routeForService: routeForService,
                     ),
                   ),
-                  child: Text(adminLoginLabel),
+                ),
+                const SizedBox(width: 22),
+                _AdminEntryButton(
+                  label: adminLoginLabel,
+                  onPressed: () => context.go('/admin/login'),
                 ),
               ],
             ),
@@ -1116,6 +1181,7 @@ class _MainNavigationBar extends StatelessWidget {
 class _DesktopMainNav extends StatelessWidget {
   const _DesktopMainNav({
     required this.language,
+    required this.currentPath,
     required this.homeNavLabel,
     required this.aboutNavLabel,
     required this.servicesNavLabel,
@@ -1131,6 +1197,7 @@ class _DesktopMainNav extends StatelessWidget {
   });
 
   final _PublicLanguage language;
+  final String currentPath;
   final String homeNavLabel;
   final String aboutNavLabel;
   final String servicesNavLabel;
@@ -1146,55 +1213,101 @@ class _DesktopMainNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: <Widget>[
-        _NavLinkButton(label: homeNavLabel, onTap: () => context.go(homePath)),
-        _NavLinkButton(
-          label: aboutNavLabel,
-          onTap: () => context.go(aboutPath),
-        ),
-        _ServicesNavDropdown(
-          language: language,
-          label: servicesNavLabel,
-          servicesPath: servicesPath,
-          serviceItems: serviceItems,
-          routeForService: routeForService,
-        ),
-        _NavLinkButton(
-          label: legalNavLabel,
-          onTap: () => context.go(legalPath),
-        ),
-        _NavLinkButton(
-          label: contactNavLabel,
-          onTap: () => context.go(contactPath),
-        ),
-      ],
+    final normalizedHomePath = Uri.parse(homePath).path;
+    final normalizedAboutPath = Uri.parse(aboutPath).path;
+    final normalizedServicesPath = Uri.parse(servicesPath).path;
+    final normalizedLegalPath = Uri.parse(legalPath).path;
+    final normalizedContactPath = Uri.parse(contactPath).path;
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Color.lerp(Colors.white, AppTheme.sand, 0.72),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE8DECF)),
+      ),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: <Widget>[
+          _NavLinkButton(
+            label: homeNavLabel,
+            isActive: currentPath == normalizedHomePath,
+            onTap: () => context.go(homePath),
+          ),
+          _NavLinkButton(
+            label: aboutNavLabel,
+            isActive: currentPath == normalizedAboutPath,
+            onTap: () => context.go(aboutPath),
+          ),
+          _ServicesNavDropdown(
+            language: language,
+            label: servicesNavLabel,
+            servicesPath: servicesPath,
+            isActive:
+                currentPath == normalizedServicesPath ||
+                currentPath.startsWith('$normalizedServicesPath/'),
+            serviceItems: serviceItems,
+            routeForService: routeForService,
+          ),
+          _NavLinkButton(
+            label: legalNavLabel,
+            isActive: currentPath == normalizedLegalPath,
+            onTap: () => context.go(legalPath),
+          ),
+          _NavLinkButton(
+            label: contactNavLabel,
+            isActive: currentPath == normalizedContactPath,
+            onTap: () => context.go(contactPath),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _NavLinkButton extends StatelessWidget {
-  const _NavLinkButton({required this.label, required this.onTap});
+  const _NavLinkButton({
+    required this.label,
+    required this.onTap,
+    this.isActive = false,
+  });
 
   final String label;
   final VoidCallback onTap;
+  final bool isActive;
 
   @override
   Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: AppTheme.ink,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: AppTheme.ink,
-          fontWeight: FontWeight.w800,
+    final textStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: isActive ? AppTheme.cobalt : AppTheme.ink,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.1,
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: isActive ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: isActive
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: AppTheme.cobalt.withValues(alpha: 0.08),
+                      blurRadius: 14,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(label, style: textStyle),
         ),
       ),
     );
@@ -1206,6 +1319,7 @@ class _ServicesNavDropdown extends StatelessWidget {
     required this.language,
     required this.label,
     required this.servicesPath,
+    required this.isActive,
     required this.serviceItems,
     required this.routeForService,
   });
@@ -1213,23 +1327,53 @@ class _ServicesNavDropdown extends StatelessWidget {
   final _PublicLanguage language;
   final String label;
   final String servicesPath;
+  final bool isActive;
   final List<PublicServiceItem> serviceItems;
   final String Function(String serviceKey) routeForService;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
+    final textStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: isActive ? AppTheme.cobalt : AppTheme.ink,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.1,
+    );
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: isActive
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: AppTheme.cobalt.withValues(alpha: 0.08),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          _NavLinkButton(label: label, onTap: () => context.go(servicesPath)),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => context.go(servicesPath),
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+                child: Text(label, style: textStyle),
+              ),
+            ),
+          ),
           PopupMenuButton<String>(
             tooltip: label,
             color: const Color(0xFFF9F5EE),
             surfaceTintColor: Colors.transparent,
-            elevation: 12,
+            elevation: 14,
             offset: const Offset(0, 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
@@ -1251,19 +1395,79 @@ class _ServicesNavDropdown extends StatelessWidget {
                   ),
                 )
                 .toList(growable: false),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 18,
-                color: AppTheme.cobalt,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 12, 14, 12),
+              child: AnimatedRotation(
+                turns: isActive ? 0.5 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                  color: isActive ? AppTheme.cobalt : AppTheme.ink,
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AdminEntryButton extends StatelessWidget {
+  const _AdminEntryButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Color.lerp(Colors.white, AppTheme.cobalt, 0.06),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.cobalt.withValues(alpha: 0.08)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.admin_panel_settings_outlined,
+                  size: 16,
+                  color: AppTheme.cobalt,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppTheme.cobalt,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                size: 18,
+                color: AppTheme.cobalt,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1661,6 +1865,7 @@ class _QuickContactPanel extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.rows,
+    required this.socialLinks,
     required this.areaLabel,
     required this.areaValue,
     required this.primaryColor,
@@ -1672,6 +1877,7 @@ class _QuickContactPanel extends StatelessWidget {
   final String title;
   final String subtitle;
   final List<_InfoLineData> rows;
+  final List<_SocialLinkData> socialLinks;
   final String areaLabel;
   final String areaValue;
   final Color primaryColor;
@@ -1681,120 +1887,594 @@ class _QuickContactPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardWidth = MediaQuery.sizeOf(context).width < 900
-        ? double.infinity
-        : 180.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final panelWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final useTwoColumns = panelWidth >= 680;
+        final imageAspectRatio = panelWidth < 480
+            ? 16 / 11.8
+            : panelWidth < 680
+            ? 16 / 10.8
+            : 16 / 8.8;
+        final primaryRows = rows
+            .where((row) => !row.compact)
+            .toList(growable: false);
+        final compactRows = rows
+            .where((row) => row.compact)
+            .toList(growable: false);
 
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(34),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: AppTheme.ink.withValues(alpha: 0.16),
-            blurRadius: 38,
-            offset: const Offset(0, 18),
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: AppTheme.ink.withValues(alpha: 0.16),
+                blurRadius: 38,
+                offset: const Offset(0, 18),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          PublicImageCard(
-            imageUrl: heroImageUrl,
-            eyebrow: visualEyebrow,
-            title: title,
-            subtitle: subtitle,
-            footer: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: <Widget>[
-                PublicTagChip(
-                  text: areaLabel,
-                  icon: Icons.public_rounded,
-                  backgroundColor: Colors.white.withValues(alpha: 0.14),
-                  foregroundColor: Colors.white,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              PublicImageCard(
+                imageUrl: heroImageUrl,
+                eyebrow: visualEyebrow,
+                title: title,
+                subtitle: subtitle,
+                aspectRatio: imageAspectRatio,
+                borderRadius: 24,
+                footer: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: <Widget>[
+                    PublicTagChip(
+                      text: areaLabel,
+                      icon: Icons.public_rounded,
+                      backgroundColor: Colors.white.withValues(alpha: 0.14),
+                      foregroundColor: Colors.white,
+                    ),
+                    PublicTagChip(
+                      text: areaValue,
+                      icon: Icons.place_rounded,
+                      backgroundColor: accentColor.withValues(alpha: 0.28),
+                      foregroundColor: Colors.white,
+                    ),
+                  ],
                 ),
-                PublicTagChip(
-                  text: areaValue,
-                  icon: Icons.place_rounded,
-                  backgroundColor: accentColor.withValues(alpha: 0.28),
-                  foregroundColor: Colors.white,
+              ),
+              const SizedBox(height: 14),
+              _QuickContactDirectory(
+                primaryRows: primaryRows,
+                compactRows: compactRows,
+                useTwoColumns: useTwoColumns,
+                primaryColor: primaryColor,
+                accentColor: accentColor,
+              ),
+              if (socialLinks.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: socialLinks
+                      .map((item) => _SocialLinkButton(data: item))
+                      .toList(growable: false),
                 ),
               ],
-            ),
+            ],
           ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: rows
-                .map(
-                  (row) => SizedBox(
-                    width: cardWidth,
-                    child: _InfoCallout(
-                      data: row,
+        );
+      },
+    );
+  }
+}
+
+class _QuickContactDirectory extends StatelessWidget {
+  const _QuickContactDirectory({
+    required this.primaryRows,
+    required this.compactRows,
+    required this.useTwoColumns,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final List<_InfoLineData> primaryRows;
+  final List<_InfoLineData> compactRows;
+  final bool useTwoColumns;
+  final Color primaryColor;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final surfaceColor = Color.lerp(primaryColor, Colors.white, 0.9)!;
+    final secondarySurface = Color.lerp(surfaceColor, AppTheme.sand, 0.4)!;
+    final strokeColor = primaryColor.withValues(alpha: 0.12);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[surfaceColor, secondarySurface],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: strokeColor),
+      ),
+      child: useTwoColumns
+          ? IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    flex: 8,
+                    child: _QuickContactColumn(
+                      rows: primaryRows,
                       primaryColor: primaryColor,
                       accentColor: accentColor,
                     ),
                   ),
-                )
-                .toList(growable: false),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: strokeColor,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 5,
+                    child: _QuickContactColumn(
+                      rows: compactRows,
+                      primaryColor: primaryColor,
+                      accentColor: accentColor,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : _QuickContactColumn(
+              rows: <_InfoLineData>[...primaryRows, ...compactRows],
+              primaryColor: primaryColor,
+              accentColor: accentColor,
+            ),
+    );
+  }
+}
+
+class _QuickContactColumn extends StatelessWidget {
+  const _QuickContactColumn({
+    required this.rows,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final List<_InfoLineData> rows;
+  final Color primaryColor;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: rows
+          .asMap()
+          .entries
+          .map(
+            (entry) => _QuickContactLine(
+              data: entry.value,
+              isLast: entry.key == rows.length - 1,
+              primaryColor: primaryColor,
+              accentColor: accentColor,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
+class _QuickContactLine extends StatelessWidget {
+  const _QuickContactLine({
+    required this.data,
+    required this.isLast,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final _InfoLineData data;
+  final bool isLast;
+  final Color primaryColor;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final iconSurface = Color.lerp(primaryColor, Colors.white, 0.82)!;
+    final accentIconColor = Color.lerp(primaryColor, accentColor, 0.18)!;
+    final labelColor = Color.lerp(primaryColor, AppTheme.ink, 0.18)!;
+    final labelWidth = data.compact ? 46.0 : 66.0;
+    final content = Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
+      child: Column(
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: data.allowWrap
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: iconSurface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(data.icon, size: 16, color: accentIconColor),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: data.compact
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: labelWidth,
+                            child: Text(
+                              data.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: labelColor,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              data.value,
+                              maxLines: data.allowWrap ? 2 : 1,
+                              softWrap: data.allowWrap,
+                              overflow: data.allowWrap
+                                  ? TextOverflow.visible
+                                  : TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: AppTheme.ink.withValues(alpha: 0.88),
+                                height: 1.25,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            data.label,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: labelColor,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            data.value,
+                            maxLines: data.allowWrap ? 2 : 1,
+                            softWrap: true,
+                            overflow: data.allowWrap
+                                ? TextOverflow.ellipsis
+                                : TextOverflow.visible,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.ink.withValues(alpha: 0.88),
+                              height: 1.3,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+              if (data.actions.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 8),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: data.actions
+                      .map((action) => _InfoActionButton(data: action))
+                      .toList(growable: false),
+                ),
+              ],
+            ],
           ),
+          if (!isLast) ...<Widget>[
+            const SizedBox(height: 10),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: primaryColor.withValues(alpha: 0.1),
+            ),
+          ],
         ],
+      ),
+    );
+
+    if (data.onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: data.onTap,
+        child: content,
       ),
     );
   }
 }
 
-class _ServiceShowcaseSection extends StatelessWidget {
+class _InfoActionButton extends StatelessWidget {
+  const _InfoActionButton({required this.data});
+
+  final _InfoLineAction data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: data.tooltip,
+      child: InkResponse(
+        radius: 18,
+        onTap: data.onTap,
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: AppTheme.cobalt.withValues(alpha: 0.08)),
+          ),
+          child: Icon(
+            data.icon,
+            size: 15,
+            color: AppTheme.cobalt.withValues(alpha: 0.86),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SocialLinkButton extends StatelessWidget {
+  const _SocialLinkButton({required this.data});
+
+  final _SocialLinkData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: data.tooltip,
+      child: InkResponse(
+        radius: 28,
+        onTap: data.onTap,
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: data.backgroundColor,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(data.icon, size: 28, color: data.foregroundColor),
+        ),
+      ),
+    );
+  }
+}
+
+class _ServiceShowcaseSection extends StatefulWidget {
   const _ServiceShowcaseSection({
     required this.title,
     required this.subtitle,
-    required this.cards,
+    required this.cardBuilders,
   });
 
   final String title;
   final String subtitle;
-  final List<Widget> cards;
+  final List<WidgetBuilder> cardBuilders;
+
+  @override
+  State<_ServiceShowcaseSection> createState() =>
+      _ServiceShowcaseSectionState();
+}
+
+class _ServiceShowcaseSectionState extends State<_ServiceShowcaseSection> {
+  PageController? _pageController;
+  double? _viewportFraction;
+  int? _cardCount;
+
+  static int _loopStartPage(int itemCount, {int seedIndex = 0}) {
+    if (itemCount <= 0) {
+      return 0;
+    }
+
+    const seedPage = 10000;
+    final basePage = seedPage - (seedPage % itemCount);
+    return basePage + (seedIndex % itemCount);
+  }
+
+  void _ensurePageController({
+    required int itemCount,
+    required double viewportFraction,
+  }) {
+    final needsNewController =
+        _pageController == null ||
+        _cardCount != itemCount ||
+        _viewportFraction == null ||
+        (_viewportFraction! - viewportFraction).abs() > 0.001;
+
+    if (!needsNewController) {
+      return;
+    }
+
+    final logicalIndex = itemCount <= 0
+        ? 0
+        : ((_pageController?.hasClients ?? false)
+                  ? (_pageController!.page?.round() ??
+                        _pageController!.initialPage)
+                  : (_pageController?.initialPage ?? 0)) %
+              itemCount;
+
+    _pageController?.dispose();
+    _cardCount = itemCount;
+    _viewportFraction = viewportFraction;
+    _pageController = PageController(
+      initialPage: _loopStartPage(itemCount, seedIndex: logicalIndex),
+      viewportFraction: viewportFraction,
+    );
+  }
+
+  @override
+  void dispose() {
+    _pageController?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cardBuilders = widget.cardBuilders;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(title, style: theme.textTheme.headlineMedium),
+        Text(widget.title, style: theme.textTheme.headlineMedium),
         const SizedBox(height: 8),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
           child: Text(
-            subtitle,
+            widget.subtitle,
             style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
           ),
         ),
         const SizedBox(height: 18),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final wide = constraints.maxWidth >= 980;
-            final cardWidth = wide
-                ? (constraints.maxWidth - 20) / 2
-                : double.infinity;
+        if (cardBuilders.isNotEmpty)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (cardBuilders.length == 1) {
+                return cardBuilders.first(context);
+              }
 
-            return Wrap(
-              spacing: 20,
-              runSpacing: 20,
-              children: cards
-                  .map((card) => SizedBox(width: cardWidth, child: card))
-                  .toList(growable: false),
-            );
-          },
-        ),
+              final layout = _ServiceCarouselLayout.forWidth(
+                constraints.maxWidth,
+              );
+              _ensurePageController(
+                itemCount: cardBuilders.length,
+                viewportFraction: layout.viewportFraction,
+              );
+
+              return SizedBox(
+                height: layout.heightFor(constraints.maxWidth),
+                child: ScrollConfiguration(
+                  behavior: const MaterialScrollBehavior().copyWith(
+                    dragDevices: <PointerDeviceKind>{
+                      PointerDeviceKind.touch,
+                      PointerDeviceKind.mouse,
+                      PointerDeviceKind.stylus,
+                      PointerDeviceKind.invertedStylus,
+                      PointerDeviceKind.unknown,
+                    },
+                  ),
+                  child: PageView.builder(
+                    controller: _pageController!,
+                    clipBehavior: Clip.none,
+                    padEnds: false,
+                    itemBuilder: (context, index) {
+                      final logicalIndex = index % cardBuilders.length;
+                      return Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: layout.cardSpacing / 2,
+                        ),
+                        child: cardBuilders[logicalIndex](context),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
       ],
     );
+  }
+}
+
+class _ServiceCarouselLayout {
+  const _ServiceCarouselLayout({
+    required this.viewportFraction,
+    required this.cardSpacing,
+    required this.minimumHeight,
+    required this.contentHeight,
+  });
+
+  final double viewportFraction;
+  final double cardSpacing;
+  final double minimumHeight;
+  final double contentHeight;
+
+  factory _ServiceCarouselLayout.forWidth(double width) {
+    if (width >= 1240) {
+      return const _ServiceCarouselLayout(
+        viewportFraction: 0.5,
+        cardSpacing: 20,
+        minimumHeight: 690,
+        contentHeight: 338,
+      );
+    }
+    if (width >= 920) {
+      return const _ServiceCarouselLayout(
+        viewportFraction: 0.64,
+        cardSpacing: 18,
+        minimumHeight: 700,
+        contentHeight: 340,
+      );
+    }
+    if (width >= 680) {
+      return const _ServiceCarouselLayout(
+        viewportFraction: 0.8,
+        cardSpacing: 16,
+        minimumHeight: 660,
+        contentHeight: 332,
+      );
+    }
+    if (width >= 480) {
+      return const _ServiceCarouselLayout(
+        viewportFraction: 0.92,
+        cardSpacing: 14,
+        minimumHeight: 660,
+        contentHeight: 344,
+      );
+    }
+    return const _ServiceCarouselLayout(
+      viewportFraction: 0.94,
+      cardSpacing: 12,
+      minimumHeight: 700,
+      contentHeight: 362,
+    );
+  }
+
+  double heightFor(double availableWidth) {
+    final cardWidth = math.max(
+      0,
+      (availableWidth * viewportFraction) - cardSpacing,
+    );
+    final estimatedHeight = (cardWidth * (10 / 16)) + contentHeight;
+    return math.max(minimumHeight, estimatedHeight);
   }
 }
 
@@ -1831,12 +2511,15 @@ class _ContentPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(title, style: theme.textTheme.headlineMedium),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-          ),
-          const SizedBox(height: 18),
+          if (subtitle.trim().isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+            ),
+            const SizedBox(height: 18),
+          ] else
+            const SizedBox(height: 18),
           child,
         ],
       ),
@@ -1844,104 +2527,399 @@ class _ContentPanel extends StatelessWidget {
   }
 }
 
-class _StoryPanel extends StatelessWidget {
+class _StoryPanel extends StatefulWidget {
   const _StoryPanel({
     required this.heroPanelTitle,
     required this.heroPanelSubtitle,
     required this.bullets,
     required this.companyName,
     required this.serviceArea,
+    required this.primaryColor,
     required this.accentColor,
+    required this.motionListenable,
   });
 
-  final String heroPanelTitle;
-  final String heroPanelSubtitle;
-  final List<String> bullets;
+  final LocalizedText heroPanelTitle;
+  final LocalizedText heroPanelSubtitle;
+  final List<LocalizedText> bullets;
   final String companyName;
-  final String serviceArea;
+  final LocalizedText serviceArea;
+  final Color primaryColor;
   final Color accentColor;
+  final ValueListenable<_StoryMotionState> motionListenable;
+
+  @override
+  State<_StoryPanel> createState() => _StoryPanelState();
+}
+
+class _StoryPanelState extends State<_StoryPanel> {
+  Timer? _sceneTimer;
+  int _sceneIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sceneTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sceneIndex = (_sceneIndex + 1) % 3;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _sceneTimer?.cancel();
+    super.dispose();
+  }
+
+  String _localizedValue(LocalizedText text, String languageCode) {
+    final value = text.resolve(languageCode).trim();
+    if (value.isNotEmpty) {
+      return value;
+    }
+    return text.resolve(languageCode == 'de' ? 'en' : 'de').trim();
+  }
+
+  List<String> _rotatedBullets(String languageCode, int start) {
+    if (widget.bullets.isEmpty) {
+      return <String>[_localizedValue(widget.heroPanelSubtitle, languageCode)];
+    }
+
+    final targetLength = math.min(3, widget.bullets.length);
+    return List<String>.generate(targetLength, (index) {
+      return _localizedValue(
+        widget.bullets[(start + index) % widget.bullets.length],
+        languageCode,
+      );
+    });
+  }
+
+  List<_StorySceneData> _buildScenes() {
+    final aboutVisual = publicPageVisualForKey('about');
+    final buildingVisual = publicServiceVisualForKey('building_cleaning');
+    final officeVisual = publicServiceVisualForKey('office_cleaning');
+    final windowVisual = publicServiceVisualForKey('window_cleaning');
+
+    return <_StorySceneData>[
+      _StorySceneData(
+        key: 'about-en',
+        localeCode: 'en',
+        localeLabel: 'English',
+        eyebrow: aboutVisual.kicker.resolve('en'),
+        title: _localizedValue(widget.heroPanelTitle, 'en'),
+        subtitle: _localizedValue(widget.heroPanelSubtitle, 'en'),
+        bullets: _rotatedBullets('en', 0),
+        imageUrl: aboutVisual.imageUrl,
+        imageAlignment: Alignment.centerLeft,
+        primaryColor: widget.primaryColor,
+        secondaryColor: widget.accentColor,
+      ),
+      _StorySceneData(
+        key: 'building-de',
+        localeCode: 'de',
+        localeLabel: 'Deutsch',
+        eyebrow: buildingVisual.eyebrow.resolve('de'),
+        title: _localizedValue(widget.heroPanelTitle, 'de'),
+        subtitle: _localizedValue(widget.heroPanelSubtitle, 'de'),
+        bullets: _rotatedBullets('de', 1),
+        imageUrl: buildingVisual.imageUrl,
+        imageAlignment: Alignment.center,
+        primaryColor: widget.accentColor,
+        secondaryColor: Color.lerp(widget.accentColor, AppTheme.ink, 0.22)!,
+      ),
+      _StorySceneData(
+        key: 'office-en',
+        localeCode: 'en',
+        localeLabel: 'English',
+        eyebrow: officeVisual.eyebrow.resolve('en'),
+        title: _localizedValue(widget.heroPanelTitle, 'en'),
+        subtitle: officeVisual.summary.resolve('en'),
+        bullets: _rotatedBullets('en', 2),
+        imageUrl: officeVisual.imageUrl,
+        imageAlignment: Alignment.centerRight,
+        primaryColor: AppTheme.pine,
+        secondaryColor: widget.primaryColor,
+      ),
+      _StorySceneData(
+        key: 'window-de',
+        localeCode: 'de',
+        localeLabel: 'Deutsch',
+        eyebrow: windowVisual.eyebrow.resolve('de'),
+        title: _localizedValue(widget.heroPanelTitle, 'de'),
+        subtitle: windowVisual.summary.resolve('de'),
+        bullets: _rotatedBullets('de', 0),
+        imageUrl: windowVisual.imageUrl,
+        imageAlignment: Alignment.centerRight,
+        primaryColor: widget.primaryColor,
+        secondaryColor: AppTheme.pine,
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scenes = _buildScenes();
+    final scene = scenes[_sceneIndex % scenes.length];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          heroPanelTitle,
-          style: theme.textTheme.titleLarge?.copyWith(color: AppTheme.ink),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          heroPanelSubtitle,
-          style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
-        ),
-        const SizedBox(height: 18),
-        ...bullets.map(
-          (bullet) => _BulletRow(text: bullet, accentColor: accentColor),
-        ),
-        const SizedBox(height: 18),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: <Widget>[
-            _MetaPill(
-              icon: Icons.apartment_rounded,
-              text: companyName,
-              backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
-              foregroundColor: AppTheme.cobalt,
-            ),
-            _MetaPill(
-              icon: Icons.place_rounded,
-              text: serviceArea,
-              backgroundColor: accentColor.withValues(alpha: 0.12),
-              foregroundColor: Color.lerp(accentColor, AppTheme.ink, 0.18)!,
-            ),
-          ],
-        ),
-      ],
+    return ValueListenableBuilder<_StoryMotionState>(
+      valueListenable: widget.motionListenable,
+      builder: (context, motion, _) {
+        final directionSign = switch (motion.direction) {
+          _StoryScrollDirection.down => 1.0,
+          _StoryScrollDirection.up => -1.0,
+          _StoryScrollDirection.idle => 0.0,
+        };
+        final imageOffset = Offset(
+          directionSign * (8 + (motion.momentum * 12)),
+          (-directionSign * 8) - (motion.progress * 6),
+        );
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 920;
+            final content = AnimatedSlide(
+              duration: const Duration(milliseconds: 700),
+              curve: Curves.easeOutCubic,
+              offset: Offset(directionSign * 0.02, 0),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 820),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                layoutBuilder: (currentChild, previousChildren) {
+                  return currentChild ?? const SizedBox.shrink();
+                },
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.04, 0.03),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: KeyedSubtree(
+                  key: ValueKey<String>('copy-${scene.key}'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          _StoryLocalePill(
+                            label: scene.localeLabel,
+                            foregroundColor: scene.primaryColor,
+                            backgroundColor: scene.primaryColor.withValues(
+                              alpha: 0.12,
+                            ),
+                          ),
+                          Text(
+                            scene.eyebrow,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: scene.primaryColor,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          Text(
+                            '${(_sceneIndex + 1).toString().padLeft(2, '0')} / ${scenes.length.toString().padLeft(2, '0')}',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: AppTheme.ink.withValues(alpha: 0.45),
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        scene.title,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: AppTheme.ink,
+                          fontSize: isCompact ? 26 : 30,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: isCompact ? constraints.maxWidth : 540,
+                        ),
+                        child: Text(
+                          scene.subtitle,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: AppTheme.ink.withValues(alpha: 0.76),
+                            height: 1.55,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 760),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        layoutBuilder: (currentChild, previousChildren) {
+                          return currentChild ?? const SizedBox.shrink();
+                        },
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SizeTransition(
+                              sizeFactor: animation,
+                              axisAlignment: -1,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Column(
+                          key: ValueKey<String>('bullets-${scene.key}'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: scene.bullets
+                              .map(
+                                (bullet) => _BulletRow(
+                                  text: bullet,
+                                  accentColor: scene.primaryColor,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: <Widget>[
+                          _MetaPill(
+                            icon: Icons.apartment_rounded,
+                            text: widget.companyName,
+                            backgroundColor: scene.primaryColor.withValues(
+                              alpha: 0.1,
+                            ),
+                            foregroundColor: scene.primaryColor,
+                          ),
+                          _MetaPill(
+                            icon: Icons.place_rounded,
+                            text: _localizedValue(
+                              widget.serviceArea,
+                              scene.localeCode,
+                            ),
+                            backgroundColor: scene.secondaryColor.withValues(
+                              alpha: 0.12,
+                            ),
+                            foregroundColor: Color.lerp(
+                              scene.secondaryColor,
+                              AppTheme.ink,
+                              0.18,
+                            )!,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+
+            final imageCard = AnimatedSwitcher(
+              duration: const Duration(milliseconds: 900),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (currentChild, previousChildren) {
+                return currentChild ?? const SizedBox.shrink();
+              },
+              transitionBuilder: (child, animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(
+                    scale: Tween<double>(
+                      begin: 1.04,
+                      end: 1,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: _StoryImageCard(
+                key: ValueKey<String>('image-${scene.key}'),
+                scene: scene,
+                sceneIndex: _sceneIndex,
+                sceneCount: scenes.length,
+                compact: isCompact,
+                imageOffset: imageOffset,
+                imageScale: 1.02 + (motion.momentum * 0.03),
+              ),
+            );
+
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 900),
+                curve: Curves.easeInOutCubic,
+                padding: EdgeInsets.all(isCompact ? 18 : 22),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      scene.primaryColor.withValues(alpha: 0.12),
+                      scene.secondaryColor.withValues(alpha: 0.1),
+                      Colors.white.withValues(alpha: 0.94),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: scene.primaryColor.withValues(alpha: 0.12),
+                  ),
+                ),
+                child: isCompact
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          imageCard,
+                          const SizedBox(height: 18),
+                          content,
+                        ],
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(flex: 6, child: content),
+                          const SizedBox(width: 22),
+                          Expanded(flex: 5, child: imageCard),
+                        ],
+                      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
 
-class _DropdownSectionPanel extends StatelessWidget {
-  const _DropdownSectionPanel({
-    required this.title,
-    required this.subtitle,
-    required this.accentColor,
-    required this.items,
+class _StoryImageCard extends StatelessWidget {
+  const _StoryImageCard({
+    super.key,
+    required this.scene,
+    required this.sceneIndex,
+    required this.sceneCount,
+    required this.compact,
+    required this.imageOffset,
+    required this.imageScale,
   });
 
-  final String title;
-  final String subtitle;
-  final Color accentColor;
-  final List<_AccordionItemData> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return _ContentPanel(
-      title: title,
-      subtitle: subtitle,
-      child: Column(
-        children: items
-            .map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _AccordionTile(data: item, accentColor: accentColor),
-              ),
-            )
-            .toList(growable: false),
-      ),
-    );
-  }
-}
-
-class _AccordionTile extends StatelessWidget {
-  const _AccordionTile({required this.data, required this.accentColor});
-
-  final _AccordionItemData data;
-  final Color accentColor;
+  final _StorySceneData scene;
+  final int sceneIndex;
+  final int sceneCount;
+  final bool compact;
+  final Offset imageOffset;
+  final double imageScale;
 
   @override
   Widget build(BuildContext context) {
@@ -1949,208 +2927,169 @@ class _AccordionTile extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F5EE),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE7DCCB)),
-      ),
-      child: Theme(
-        data: theme.copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          collapsedShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          iconColor: AppTheme.ink.withValues(alpha: 0.8),
-          collapsedIconColor: AppTheme.ink.withValues(alpha: 0.8),
-          leading: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: accentColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(
-              data.icon,
-              color: Color.lerp(accentColor, AppTheme.ink, 0.18),
-              size: 22,
-            ),
-          ),
-          title: Text(
-            data.title,
-            style: theme.textTheme.titleLarge?.copyWith(fontSize: 20),
-          ),
-          subtitle: data.subtitle.isEmpty
-              ? null
-              : Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    data.subtitle,
-                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
-                  ),
-                ),
-          children: <Widget>[
-            if (data.rows.isNotEmpty)
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.76),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE6D8C5)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    children: data.rows
-                        .asMap()
-                        .entries
-                        .map(
-                          (entry) => _DefinitionRow(
-                            pair: entry.value,
-                            isLast: entry.key == data.rows.length - 1,
-                          ),
-                        )
-                        .toList(growable: false),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FooterCallout extends StatelessWidget {
-  const _FooterCallout({
-    required this.badge,
-    required this.title,
-    required this.subtitle,
-    required this.accentColor,
-  });
-
-  final String badge;
-  final String title;
-  final String subtitle;
-  final Color accentColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: <Color>[
-            AppTheme.ink,
-            Color.lerp(AppTheme.ink, accentColor, 0.18)!,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
         borderRadius: BorderRadius.circular(28),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: AppTheme.ink.withValues(alpha: 0.16),
-            blurRadius: 28,
-            offset: const Offset(0, 14),
+            color: scene.primaryColor.withValues(alpha: 0.12),
+            blurRadius: 26,
+            offset: const Offset(0, 18),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          _MetaPill(
-            icon: Icons.data_object_rounded,
-            text: badge,
-            backgroundColor: Colors.white.withValues(alpha: 0.1),
-            foregroundColor: Colors.white,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: SizedBox(
+          height: compact ? 240 : 360,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              Transform.translate(
+                offset: imageOffset,
+                child: Transform.scale(
+                  scale: imageScale,
+                  child: Image.network(
+                    scene.imageUrl,
+                    fit: BoxFit.cover,
+                    alignment: scene.imageAlignment,
+                    errorBuilder: (context, error, stackTrace) {
+                      return DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: <Color>[
+                              scene.primaryColor.withValues(alpha: 0.78),
+                              scene.secondaryColor.withValues(alpha: 0.72),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      AppTheme.ink.withValues(alpha: 0.76),
+                      scene.primaryColor.withValues(alpha: 0.4),
+                      Colors.transparent,
+                    ],
+                    begin: Alignment.bottomLeft,
+                    end: Alignment.topRight,
+                    stops: const <double>[0, 0.55, 1],
+                  ),
+                ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      scene.secondaryColor.withValues(alpha: 0.12),
+                      Colors.transparent,
+                      scene.primaryColor.withValues(alpha: 0.18),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 18,
+                left: 18,
+                child: _StoryLocalePill(
+                  label: scene.localeLabel,
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.16),
+                ),
+              ),
+              Positioned(
+                top: 18,
+                right: 18,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  child: Text(
+                    '${(sceneIndex + 1).toString().padLeft(2, '0')} / ${sceneCount.toString().padLeft(2, '0')}',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 18,
+                right: 18,
+                bottom: 18,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      scene.eyebrow,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.88),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      scene.title,
+                      maxLines: compact ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        color: Colors.white,
+                        fontSize: compact ? 28 : 34,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withValues(alpha: 0.78),
-              height: 1.55,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _InfoCallout extends StatelessWidget {
-  const _InfoCallout({
-    required this.data,
-    required this.primaryColor,
-    required this.accentColor,
+class _StoryLocalePill extends StatelessWidget {
+  const _StoryLocalePill({
+    required this.label,
+    required this.foregroundColor,
+    required this.backgroundColor,
   });
 
-  final _InfoLineData data;
-  final Color primaryColor;
-  final Color accentColor;
+  final String label;
+  final Color foregroundColor;
+  final Color backgroundColor;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final surfaceColor = Color.lerp(Colors.white, AppTheme.sand, 0.68)!;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: surfaceColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE4D8C9)),
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Color.lerp(primaryColor, Colors.white, 0.86),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              data.icon,
-              size: 20,
-              color: Color.lerp(primaryColor, accentColor, 0.26),
-            ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: foregroundColor,
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  data.label,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: AppTheme.cobalt,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  data.value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.ink,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2187,54 +3126,6 @@ class _BulletRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DefinitionRow extends StatelessWidget {
-  const _DefinitionRow({required this.pair, required this.isLast});
-
-  final _InfoPairData pair;
-  final bool isLast;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: isLast
-                ? BorderSide.none
-                : BorderSide(color: AppTheme.clay.withValues(alpha: 0.52)),
-          ),
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                pair.label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: AppTheme.cobalt,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                pair.value,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.ink,
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -2292,58 +3183,103 @@ class _InfoLineData {
     required this.label,
     required this.value,
     required this.icon,
+    required this.compact,
+    required this.allowWrap,
+    this.onTap,
+    this.actions = const <_InfoLineAction>[],
   });
 
   final String label;
   final String value;
   final IconData icon;
+  final bool compact;
+  final bool allowWrap;
+  final VoidCallback? onTap;
+  final List<_InfoLineAction> actions;
 }
 
-class _InfoPairData {
-  const _InfoPairData({required this.label, required this.value});
+class _InfoLineAction {
+  const _InfoLineAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
-  final String label;
-  final String value;
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
 }
 
-class _AccordionItemData {
-  const _AccordionItemData({
+class _SocialLinkData {
+  const _SocialLinkData({
+    required this.icon,
+    required this.tooltip,
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final VoidCallback onTap;
+}
+
+enum _StoryScrollDirection { idle, up, down }
+
+class _StoryMotionState {
+  const _StoryMotionState({
+    this.progress = 0,
+    this.momentum = 0,
+    this.direction = _StoryScrollDirection.idle,
+  });
+
+  final double progress;
+  final double momentum;
+  final _StoryScrollDirection direction;
+}
+
+class _StorySceneData {
+  const _StorySceneData({
+    required this.key,
+    required this.localeCode,
+    required this.localeLabel,
+    required this.eyebrow,
     required this.title,
     required this.subtitle,
-    required this.icon,
-    this.rows = const <_InfoPairData>[],
+    required this.bullets,
+    required this.imageUrl,
+    required this.imageAlignment,
+    required this.primaryColor,
+    required this.secondaryColor,
   });
 
+  final String key;
+  final String localeCode;
+  final String localeLabel;
+  final String eyebrow;
   final String title;
   final String subtitle;
-  final IconData icon;
-  final List<_InfoPairData> rows;
+  final List<String> bullets;
+  final String imageUrl;
+  final Alignment imageAlignment;
+  final Color primaryColor;
+  final Color secondaryColor;
 }
 
 class _UiLabels {
   const _UiLabels({
     required this.addressLabel,
     required this.phoneLabel,
-    required this.secondaryPhoneLabel,
     required this.emailLabel,
     required this.hoursLabel,
-    required this.legalNameLabel,
-    required this.categoryLabel,
     required this.companyPanelTitle,
     required this.companyPanelSubtitle,
-    required this.contactPanelTitle,
-    required this.contactPanelSubtitle,
-    required this.companyAccordionTitle,
-    required this.contactAccordionTitle,
-    required this.coverageAccordionTitle,
     required this.servicesPanelSubtitle,
-    required this.processPanelSubtitle,
     required this.quickContactTitle,
     required this.quickContactSubtitle,
     required this.serviceAreaLabel,
-    required this.footerBadge,
-    required this.footerTitle,
-    required this.footerSubtitle,
     required this.heroFastResponseLabel,
     required this.heroAudienceLabel,
     required this.utilityQuoteLabel,
@@ -2354,30 +3290,28 @@ class _UiLabels {
     required this.legalNavLabel,
     required this.contactNavLabel,
     required this.sectionsMenuLabel,
+    required this.copyActionLabel,
+    required this.callActionLabel,
+    required this.mapActionLabel,
+    required this.emailActionLabel,
+    required this.instagramActionLabel,
+    required this.facebookActionLabel,
+    required this.phoneCopiedMessage,
+    required this.emailCopiedMessage,
+    required this.addressCopiedMessage,
+    required this.linkOpenFailedMessage,
   });
 
   final String addressLabel;
   final String phoneLabel;
-  final String secondaryPhoneLabel;
   final String emailLabel;
   final String hoursLabel;
-  final String legalNameLabel;
-  final String categoryLabel;
   final String companyPanelTitle;
   final String companyPanelSubtitle;
-  final String contactPanelTitle;
-  final String contactPanelSubtitle;
-  final String companyAccordionTitle;
-  final String contactAccordionTitle;
-  final String coverageAccordionTitle;
   final String servicesPanelSubtitle;
-  final String processPanelSubtitle;
   final String quickContactTitle;
   final String quickContactSubtitle;
   final String serviceAreaLabel;
-  final String footerBadge;
-  final String footerTitle;
-  final String footerSubtitle;
   final String heroFastResponseLabel;
   final String heroAudienceLabel;
   final String utilityQuoteLabel;
@@ -2388,4 +3322,14 @@ class _UiLabels {
   final String legalNavLabel;
   final String contactNavLabel;
   final String sectionsMenuLabel;
+  final String copyActionLabel;
+  final String callActionLabel;
+  final String mapActionLabel;
+  final String emailActionLabel;
+  final String instagramActionLabel;
+  final String facebookActionLabel;
+  final String phoneCopiedMessage;
+  final String emailCopiedMessage;
+  final String addressCopiedMessage;
+  final String linkOpenFailedMessage;
 }

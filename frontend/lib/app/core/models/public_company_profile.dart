@@ -62,6 +62,8 @@ class PublicContactInfo {
     required this.phone,
     required this.secondaryPhone,
     required this.email,
+    required this.instagramUrl,
+    required this.facebookUrl,
     required this.hoursLabel,
   });
 
@@ -72,6 +74,8 @@ class PublicContactInfo {
   final String phone;
   final String secondaryPhone;
   final String email;
+  final String instagramUrl;
+  final String facebookUrl;
   final LocalizedText hoursLabel;
 
   factory PublicContactInfo.fromJson(Map<String, dynamic> json) {
@@ -83,6 +87,8 @@ class PublicContactInfo {
       phone: json['phone'] as String? ?? '',
       secondaryPhone: json['secondaryPhone'] as String? ?? '',
       email: json['email'] as String? ?? '',
+      instagramUrl: json['instagramUrl'] as String? ?? '',
+      facebookUrl: json['facebookUrl'] as String? ?? '',
       hoursLabel: LocalizedText.fromJson(
         json['hoursLabel'] as Map<String, dynamic>?,
       ),

@@ -49,6 +49,8 @@ class PublicSiteShell extends StatelessWidget {
     required this.body,
     this.eyebrow,
     this.heroVisual,
+    this.heroActions,
+    this.heroDetails,
   });
 
   final PublicCompanyProfileModel profile;
@@ -60,6 +62,8 @@ class PublicSiteShell extends StatelessWidget {
   final String? eyebrow;
   final Widget body;
   final Widget? heroVisual;
+  final Widget? heroActions;
+  final Widget? heroDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +135,8 @@ class PublicSiteShell extends StatelessWidget {
                           accentColor: accentColor,
                           isCompact: isCompact,
                           heroVisual: heroVisual,
+                          heroActions: heroActions,
+                          heroDetails: heroDetails,
                         ),
                       ),
                     ],
@@ -340,15 +346,25 @@ class _PublicMainNav extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Container(
-          width: 52,
-          height: 52,
+          width: isCompact ? 52 : 56,
+          height: isCompact ? 52 : 56,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: <Color>[Color(0xFF1D5EC2), Color(0xFF79C8F6)],
+            gradient: LinearGradient(
+              colors: <Color>[
+                Color.lerp(AppTheme.cobalt, AppTheme.ink, 0.12)!,
+                Color.lerp(AppTheme.cobalt, Colors.white, 0.28)!,
+              ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(18),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: AppTheme.cobalt.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
           ),
           child: const Icon(
             Icons.cleaning_services_rounded,
@@ -357,11 +373,17 @@ class _PublicMainNav extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 14),
-        Text(
-          profile.companyName,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            color: AppTheme.ink,
-            fontWeight: FontWeight.w700,
+        Flexible(
+          child: Text(
+            profile.companyName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: AppTheme.ink,
+              fontWeight: FontWeight.w700,
+              fontSize: isCompact ? 18 : 20,
+              letterSpacing: -0.4,
+            ),
           ),
         ),
       ],
@@ -369,85 +391,133 @@ class _PublicMainNav extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 16 : 18,
+        vertical: isCompact ? 14 : 16,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
+        color: Colors.white.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: AppTheme.ink.withValues(alpha: 0.16),
-            blurRadius: 24,
-            offset: const Offset(0, 16),
+            color: AppTheme.ink.withValues(alpha: 0.14),
+            blurRadius: 28,
+            offset: const Offset(0, 18),
           ),
         ],
       ),
       child: isCompact
-          ? Row(
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Expanded(child: brand),
-                const SizedBox(width: 12),
-                _PublicCompactMenu(
-                  copy: copy,
-                  language: language,
-                  profile: profile,
+                Row(
+                  children: <Widget>[
+                    Expanded(child: brand),
+                    const SizedBox(width: 12),
+                    _PublicCompactMenu(
+                      copy: copy,
+                      language: language,
+                      profile: profile,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _PublicAdminEntryButton(
+                    label: resolvePublicText(profile.adminLoginLabel, language),
+                    onPressed: () => context.go('/admin/login'),
+                  ),
                 ),
               ],
             )
           : Row(
               children: <Widget>[
-                brand,
-                const Spacer(),
-                Wrap(
-                  spacing: 6,
-                  children: <Widget>[
-                    _PublicNavButton(
-                      label: copy.homeLabel,
-                      isActive: activeItem == PublicNavItem.home,
-                      onTap: () => _go(context, '/', language),
-                    ),
-                    _PublicNavButton(
-                      label: copy.aboutLabel,
-                      isActive: activeItem == PublicNavItem.about,
-                      onTap: () => _go(context, '/about', language),
-                    ),
-                    _PublicServicesDropdown(
-                      label: copy.servicesLabel,
+                Flexible(
+                  flex: 5,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: brand,
+                  ),
+                ),
+                const SizedBox(width: 22),
+                Expanded(
+                  flex: 7,
+                  child: Center(
+                    child: _DesktopPublicNavGroup(
                       profile: profile,
                       language: language,
-                      isActive: activeItem == PublicNavItem.services,
+                      activeItem: activeItem,
+                      copy: copy,
                     ),
-                    _PublicNavButton(
-                      label: copy.legalLabel,
-                      isActive: activeItem == PublicNavItem.legal,
-                      onTap: () => _go(context, '/legal', language),
-                    ),
-                    _PublicNavButton(
-                      label: copy.contactLabel,
-                      isActive: activeItem == PublicNavItem.contact,
-                      onTap: () => _go(context, '/contact', language),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(width: 16),
-                FilledButton.tonal(
+                const SizedBox(width: 22),
+                _PublicAdminEntryButton(
+                  label: resolvePublicText(profile.adminLoginLabel, language),
                   onPressed: () => context.go('/admin/login'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
-                    foregroundColor: AppTheme.cobalt,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  child: Text(
-                    resolvePublicText(profile.adminLoginLabel, language),
-                  ),
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _DesktopPublicNavGroup extends StatelessWidget {
+  const _DesktopPublicNavGroup({
+    required this.profile,
+    required this.language,
+    required this.activeItem,
+    required this.copy,
+  });
+
+  final PublicCompanyProfileModel profile;
+  final PublicSiteLanguage language;
+  final PublicNavItem activeItem;
+  final _PublicSiteCopy copy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Color.lerp(Colors.white, AppTheme.sand, 0.72),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE8DECF)),
+      ),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: <Widget>[
+          _PublicNavButton(
+            label: copy.homeLabel,
+            isActive: activeItem == PublicNavItem.home,
+            onTap: () => _go(context, '/', language),
+          ),
+          _PublicNavButton(
+            label: copy.aboutLabel,
+            isActive: activeItem == PublicNavItem.about,
+            onTap: () => _go(context, '/about', language),
+          ),
+          _PublicServicesDropdown(
+            label: copy.servicesLabel,
+            profile: profile,
+            language: language,
+            isActive: activeItem == PublicNavItem.services,
+          ),
+          _PublicNavButton(
+            label: copy.legalLabel,
+            isActive: activeItem == PublicNavItem.legal,
+            onTap: () => _go(context, '/legal', language),
+          ),
+          _PublicNavButton(
+            label: copy.contactLabel,
+            isActive: activeItem == PublicNavItem.contact,
+            onTap: () => _go(context, '/contact', language),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -543,21 +613,37 @@ class _PublicNavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: isActive ? AppTheme.cobalt : AppTheme.ink,
-        backgroundColor: isActive
-            ? AppTheme.cobalt.withValues(alpha: 0.08)
-            : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(
-          context,
-        ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: isActive ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: isActive
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: AppTheme.cobalt.withValues(alpha: 0.08),
+                      blurRadius: 14,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: isActive ? AppTheme.cobalt : AppTheme.ink,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -578,31 +664,40 @@ class _PublicServicesDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        color: isActive
-            ? AppTheme.cobalt.withValues(alpha: 0.08)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        color: isActive ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: isActive
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: AppTheme.cobalt.withValues(alpha: 0.08),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          TextButton(
-            onPressed: () => _go(context, '/services', language),
-            style: TextButton.styleFrom(
-              foregroundColor: isActive ? AppTheme.cobalt : AppTheme.ink,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: isActive ? AppTheme.cobalt : AppTheme.ink,
-                fontWeight: FontWeight.w800,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _go(context, '/services', language),
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: isActive ? AppTheme.cobalt : AppTheme.ink,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.1,
+                  ),
+                ),
               ),
             ),
           ),
@@ -610,6 +705,7 @@ class _PublicServicesDropdown extends StatelessWidget {
             tooltip: label,
             color: const Color(0xFFF8F4EC),
             surfaceTintColor: Colors.transparent,
+            elevation: 14,
             offset: const Offset(0, 10),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
@@ -624,13 +720,79 @@ class _PublicServicesDropdown extends StatelessWidget {
                   ),
                 )
                 .toList(growable: false),
-            child: Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 18,
-              color: isActive ? AppTheme.cobalt : AppTheme.ink,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 12, 14, 12),
+              child: AnimatedRotation(
+                turns: isActive ? 0.5 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                  color: isActive ? AppTheme.cobalt : AppTheme.ink,
+                ),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PublicAdminEntryButton extends StatelessWidget {
+  const _PublicAdminEntryButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Color.lerp(Colors.white, AppTheme.cobalt, 0.06),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.cobalt.withValues(alpha: 0.08)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.admin_panel_settings_outlined,
+                  size: 16,
+                  color: AppTheme.cobalt,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppTheme.cobalt,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                size: 18,
+                color: AppTheme.cobalt,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -645,6 +807,8 @@ class _PublicPageHero extends StatelessWidget {
     required this.isCompact,
     this.eyebrow,
     this.heroVisual,
+    this.heroActions,
+    this.heroDetails,
   });
 
   final String? eyebrow;
@@ -654,6 +818,8 @@ class _PublicPageHero extends StatelessWidget {
   final Color accentColor;
   final bool isCompact;
   final Widget? heroVisual;
+  final Widget? heroActions;
+  final Widget? heroDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -706,6 +872,14 @@ class _PublicPageHero extends StatelessWidget {
             ),
           ),
         ),
+        if (heroActions != null) ...<Widget>[
+          const SizedBox(height: 24),
+          heroActions!,
+        ],
+        if (heroDetails != null) ...<Widget>[
+          const SizedBox(height: 24),
+          heroDetails!,
+        ],
       ],
     );
 
@@ -805,18 +979,20 @@ class PublicSurfaceCard extends StatelessWidget {
   const PublicSurfaceCard({
     super.key,
     required this.child,
+    this.padding = const EdgeInsets.all(24),
     this.title,
     this.subtitle,
   });
 
   final Widget child;
+  final EdgeInsetsGeometry padding;
   final String? title;
   final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: padding,
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(30),
@@ -1075,66 +1251,116 @@ class PublicServiceFeatureCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PublicSurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          PublicImageCard(
-            heroTag: heroTag,
-            imageUrl: imageUrl,
-            aspectRatio: 16 / 10,
-            eyebrow: eyebrow,
-            title: title,
-          ),
-          const SizedBox(height: 18),
-          Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final theme = Theme.of(context);
+        final isCompact = constraints.maxWidth < 420;
+        final imageAspectRatio = isCompact ? 16 / 8.8 : 16 / 10;
+        final iconBoxSize = isCompact ? 40.0 : 44.0;
+        final iconRadius = isCompact ? 14.0 : 16.0;
+        final horizontalGap = isCompact ? 10.0 : 12.0;
+        final topGap = isCompact ? 14.0 : 18.0;
+        final contentGap = isCompact ? 14.0 : 16.0;
+        final chipGap = isCompact ? 8.0 : 10.0;
+        final buttonGap = isCompact ? 14.0 : 18.0;
+        final summaryStyle =
+            (isCompact ? theme.textTheme.bodySmall : theme.textTheme.bodyMedium)
+                ?.copyWith(
+                  color: AppTheme.ink,
+                  height: isCompact ? 1.48 : 1.55,
+                );
+
+        Widget buildMetricChip(String metric) {
+          if (!isCompact) {
+            return PublicTagChip(
+              text: metric,
+              backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
+              foregroundColor: AppTheme.cobalt,
+            );
+          }
+
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppTheme.cobalt.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              child: Text(
+                metric,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: AppTheme.cobalt,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          );
+        }
+
+        return PublicSurfaceCard(
+          padding: EdgeInsets.all(isCompact ? 20 : 24),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppTheme.cobalt.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: AppTheme.cobalt),
+              PublicImageCard(
+                heroTag: heroTag,
+                imageUrl: imageUrl,
+                aspectRatio: imageAspectRatio,
+                eyebrow: eyebrow,
+                title: title,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  summary,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.ink,
-                    height: 1.55,
+              SizedBox(height: topGap),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: iconBoxSize,
+                    height: iconBoxSize,
+                    decoration: BoxDecoration(
+                      color: AppTheme.cobalt.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(iconRadius),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: isCompact ? 20 : 24,
+                      color: AppTheme.cobalt,
+                    ),
                   ),
+                  SizedBox(width: horizontalGap),
+                  Expanded(child: Text(summary, style: summaryStyle)),
+                ],
+              ),
+              SizedBox(height: contentGap),
+              PublicBulletList(items: highlights),
+              SizedBox(height: isCompact ? 4 : 6),
+              Wrap(
+                spacing: chipGap,
+                runSpacing: chipGap,
+                children: metrics.map(buildMetricChip).toList(growable: false),
+              ),
+              SizedBox(height: buttonGap),
+              SizedBox(
+                width: isCompact ? double.infinity : null,
+                child: FilledButton.icon(
+                  onPressed: onTap,
+                  style: isCompact
+                      ? FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        )
+                      : null,
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: Text(actionLabel),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          PublicBulletList(items: highlights),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: metrics
-                .map(
-                  (metric) => PublicTagChip(
-                    text: metric,
-                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.08),
-                    foregroundColor: AppTheme.cobalt,
-                  ),
-                )
-                .toList(growable: false),
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: onTap,
-            icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(actionLabel),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

@@ -65,6 +65,10 @@ class _PublicServiceDetailScreenState
         final bookingPath = languageCode == 'de'
             ? '/book-service?lang=de&service=${service.key}'
             : '/book-service?service=${service.key}';
+        final bookServiceLabel = resolvePublicText(
+          profile.createAccountLabel,
+          _language,
+        );
 
         return PublicSiteShell(
           profile: profile,
@@ -76,6 +80,51 @@ class _PublicServiceDetailScreenState
           eyebrow: resolvePublicText(profile.category, _language),
           pageTitle: title,
           pageSubtitle: subtitle,
+          heroActions: Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: <Widget>[
+              FilledButton.icon(
+                onPressed: () => context.go(bookingPath),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppTheme.ink,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 16,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                icon: const Icon(Icons.arrow_forward_rounded),
+                label: Text(bookServiceLabel),
+              ),
+              OutlinedButton(
+                onPressed: () => context.go(servicesPath),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 16,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                child: Text(isGerman ? 'Alle Leistungen' : 'All services'),
+              ),
+            ],
+          ),
+          heroDetails: _ServiceHeroDetails(
+            title: isGerman
+                ? 'Was diese Leistung umfasst'
+                : 'What this service includes',
+            items: visual.highlights
+                .map((item) => item.resolve(languageCode))
+                .toList(growable: false),
+          ),
           heroVisual: PublicImageCard(
             heroTag: publicServiceHeroTag(service.key),
             imageUrl: visual.imageUrl,
@@ -96,191 +145,79 @@ class _PublicServiceDetailScreenState
                   .toList(growable: false),
             ),
           ),
-          body: LayoutBuilder(
-            builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 980;
-              final overviewCard = PublicSurfaceCard(
-                title: isGerman ? 'Leistungsüberblick' : 'Service overview',
-                subtitle: resolvePublicText(
-                  profile.serviceCardSubtitle,
-                  _language,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    PublicBulletList(
-                      items: visual.highlights
-                          .map((item) => item.resolve(languageCode))
-                          .toList(growable: false),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: visual.metrics
-                          .map(
-                            (metric) => PublicTagChip(
-                              text: metric.resolve(languageCode),
-                              icon: Icons.check_circle_outline_rounded,
-                              backgroundColor: AppTheme.cobalt.withValues(
-                                alpha: 0.08,
-                              ),
-                              foregroundColor: AppTheme.cobalt,
-                            ),
-                          )
-                          .toList(growable: false),
-                    ),
-                  ],
-                ),
-              );
-
-              final factsCard = PublicSurfaceCard(
-                title: isGerman ? 'Rahmendaten' : 'Service facts',
-                subtitle: isGerman
-                    ? 'Die wichtigsten öffentlichen Informationen für diese Leistung.'
-                    : 'The key public information for this service.',
-                child: PublicInfoList(
-                  rows: <PublicInfoRowData>[
-                    PublicInfoRowData(
-                      label: isGerman ? 'Leistung' : 'Service',
-                      value: serviceName,
-                      icon: Icons.cleaning_services_rounded,
-                    ),
-                    PublicInfoRowData(
-                      label: isGerman ? 'Einsatzgebiet' : 'Service area',
-                      value: resolvePublicText(
-                        profile.serviceAreaText,
-                        _language,
-                      ),
-                      icon: Icons.public_rounded,
-                    ),
-                    PublicInfoRowData(
-                      label: isGerman ? 'Erreichbarkeit' : 'Availability',
-                      value: resolvePublicText(
-                        profile.contact.hoursLabel,
-                        _language,
-                      ),
-                      icon: Icons.schedule_rounded,
-                    ),
-                    PublicInfoRowData(
-                      label: isGerman ? 'Kontakt' : 'Contact',
-                      value: profile.contact.phone,
-                      icon: Icons.call_rounded,
-                    ),
-                  ],
-                ),
-              );
-
-              final processCard = PublicSurfaceCard(
-                title: resolvePublicText(profile.howItWorksTitle, _language),
-                subtitle: isGerman
-                    ? 'Der Ablauf bleibt einfach und für alle Leistungen konsistent.'
-                    : 'The workflow stays simple and consistent across services.',
-                child: PublicInfoList(
-                  rows: profile.howItWorksSteps
-                      .map(
-                        (step) => PublicInfoRowData(
-                          label: resolvePublicText(step.title, _language),
-                          value: resolvePublicText(step.subtitle, _language),
-                          icon: Icons.timeline_rounded,
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-              );
-
-              final actionCard = PublicSurfaceCard(
-                title: isGerman ? 'Nächster Schritt' : 'Next step',
-                subtitle: isGerman
-                    ? 'Zur Leistungsübersicht zurück oder direkt eine Kundenanfrage starten.'
-                    : 'Return to the services overview or start a customer request directly.',
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: <Widget>[
-                    FilledButton(
-                      onPressed: () => context.go(servicesPath),
-                      child: Text(
-                        isGerman ? 'Alle Leistungen' : 'All services',
-                      ),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => context.go(bookingPath),
-                      child: Text(
-                        resolvePublicText(
-                          profile.createAccountLabel,
-                          _language,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-
-              if (wide) {
-                return Column(
-                  children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: PublicReveal(
-                            delay: const Duration(milliseconds: 80),
-                            child: overviewCard,
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: PublicReveal(
-                            delay: const Duration(milliseconds: 150),
-                            child: factsCard,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    PublicReveal(
-                      delay: const Duration(milliseconds: 220),
-                      child: processCard,
-                    ),
-                    const SizedBox(height: 20),
-                    PublicReveal(
-                      delay: const Duration(milliseconds: 290),
-                      child: actionCard,
-                    ),
-                  ],
-                );
-              }
-
-              return Column(
-                children: <Widget>[
-                  PublicReveal(
-                    delay: const Duration(milliseconds: 80),
-                    child: overviewCard,
-                  ),
-                  const SizedBox(height: 20),
-                  PublicReveal(
-                    delay: const Duration(milliseconds: 150),
-                    child: factsCard,
-                  ),
-                  const SizedBox(height: 20),
-                  PublicReveal(
-                    delay: const Duration(milliseconds: 220),
-                    child: processCard,
-                  ),
-                  const SizedBox(height: 20),
-                  PublicReveal(
-                    delay: const Duration(milliseconds: 290),
-                    child: actionCard,
-                  ),
-                ],
-              );
-            },
-          ),
+          body: const SizedBox.shrink(),
         );
       },
       loading: () => const _PublicPageLoadingScaffold(),
       error: (error, stackTrace) => const _PublicPageErrorScaffold(),
+    );
+  }
+}
+
+class _ServiceHeroDetails extends StatelessWidget {
+  const _ServiceHeroDetails({required this.title, required this.items});
+
+  final String title;
+  final List<String> items;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 720),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: Colors.white.withValues(alpha: 0.92),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.86),
+                        height: 1.55,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

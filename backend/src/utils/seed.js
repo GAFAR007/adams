@@ -111,29 +111,29 @@ async function runSeed() {
       de: "Mitarbeiter-Login",
     },
     heroPanelTitle: {
-      en: "Company snapshot",
-      de: "Unternehmensprofil",
+      en: "Reliable support for clean, welcoming spaces",
+      de: "Verlässliche Unterstützung für saubere, einladende Räume",
     },
     heroPanelSubtitle: {
-      en: "Public details seeded from the business information you shared.",
-      de: "Öffentliche Angaben, die aus den von dir geteilten Unternehmensdaten befüllt wurden.",
+      en: "CL Facility Management supports homes, offices, and shared buildings in Mönchengladbach with practical, dependable cleaning.",
+      de: "CL Facility Management unterstützt Wohnungen, Büros und Gemeinschaftsflächen in Mönchengladbach mit praktischer und verlässlicher Reinigung.",
     },
     heroBullets: [
       {
-        en: "Cleaning service based at Kunkel Str. 44, 41063 Mönchengladbach, Germany",
-        de: "Reinigungsservice mit Sitz in der Kunkel Str. 44, 41063 Mönchengladbach, Deutschland",
+        en: "Regular and one-off cleaning arranged around the property, schedule, and day-to-day needs.",
+        de: "Regelmäßige und einmalige Reinigungen, abgestimmt auf Objekt, Zeitplan und den Alltag vor Ort.",
       },
       {
-        en: "Direct contact by phone and email for incoming requests",
-        de: "Direkter Kontakt per Telefon und E-Mail für neue Anfragen",
+        en: "Direct contact for quotes, scheduling, and practical service questions when needed.",
+        de: "Direkter Kontakt für Angebote, Terminabstimmung und praktische Servicefragen, wenn Unterstützung gebraucht wird.",
       },
       {
-        en: "Always open for enquiries according to the shared business profile",
-        de: "Laut dem geteilten Unternehmensprofil jederzeit für Anfragen erreichbar",
+        en: "Local support across Mönchengladbach for homes, offices, windows, and shared spaces.",
+        de: "Lokale Unterstützung in Mönchengladbach für Wohnungen, Büros, Fenster und Gemeinschaftsflächen.",
       },
       {
-        en: "Facility support for house, office, window, and building cleaning",
-        de: "Facility-Support für Haus-, Büro-, Fenster- und Gebäudereinigung",
+        en: "A cleaner presentation and a more dependable day-to-day experience for customers, residents, and teams.",
+        de: "Ein gepflegter Auftritt und ein verlässlicherer Alltag für Kundschaft, Bewohner und Teams.",
       },
     ],
     servicesTitle: {
@@ -234,6 +234,8 @@ async function runSeed() {
       phone: "+49 2166 6377345",
       secondaryPhone: "",
       email: "cl.facility.management@gmx.de",
+      instagramUrl: "https://www.instagram.com/",
+      facebookUrl: "https://www.facebook.com/profile.php?id=61575728904144",
       hoursLabel: {
         en: "Always open",
         de: "Immer geöffnet",

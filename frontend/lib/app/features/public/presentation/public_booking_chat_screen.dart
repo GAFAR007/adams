@@ -754,13 +754,24 @@ class _PublicBookingChatScreenState
                   children: profile.serviceLabels
                       .map(
                         (service) => ActionChip(
-                          backgroundColor: Colors.white.withValues(alpha: 0.08),
+                          backgroundColor: const Color(0xFFF4F7FC),
+                          surfaceTintColor: Colors.transparent,
                           side: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.10),
+                            color: AppTheme.cobalt.withValues(alpha: 0.16),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
                           ),
                           label: Text(
                             resolvePublicText(service.label, _language),
-                            style: const TextStyle(color: Colors.white),
+                            style: const TextStyle(
+                              color: AppTheme.ink,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           onPressed: () =>
                               _handleSubmit(profile, selectedService: service),
@@ -847,6 +858,10 @@ class _PublicBookingChatScreenState
                           !_isSending &&
                           !_isCreatingAccount &&
                           currentStep != _BookingStep.done,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w600,
+                      ),
                       obscureText: isSensitiveStep && !_isSensitiveInputVisible,
                       keyboardType: switch (currentStep) {
                         _BookingStep.email => TextInputType.emailAddress,
@@ -857,6 +872,11 @@ class _PublicBookingChatScreenState
                       onSubmitted: (_) => _handleSubmit(profile),
                       decoration: InputDecoration(
                         hintText: _placeholderForStep(currentStep),
+                        hintStyle: Theme.of(context).textTheme.bodyLarge
+                            ?.copyWith(
+                              color: AppTheme.ink.withValues(alpha: 0.62),
+                              fontWeight: FontWeight.w500,
+                            ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 18,
@@ -881,6 +901,7 @@ class _PublicBookingChatScreenState
                                   _isSensitiveInputVisible
                                       ? Icons.visibility_off_rounded
                                       : Icons.visibility_rounded,
+                                  color: AppTheme.ink.withValues(alpha: 0.68),
                                 ),
                               )
                             : null,
