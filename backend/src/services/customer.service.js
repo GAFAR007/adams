@@ -31,6 +31,7 @@ const {
   buildAiMessage,
   buildCustomerMessage,
   buildRequestMessageAttachment,
+  buildSystemMessage,
 } = require('../utils/request-chat');
 const { attachProofToInvoice } = require('../utils/request-payment');
 const {
