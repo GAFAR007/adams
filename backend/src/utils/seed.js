@@ -1,7 +1,7 @@
 /**
- * WHAT: Seeds MongoDB with the public company profile, one admin, sample staff, sample customers, and sample service requests.
- * WHY: The first frontend, homepage, and dashboard flows need predictable data for immediate testing.
- * HOW: Reset the small v1 collections, seed the company profile, hash seed passwords from env, and create linked demo records.
+ * WHAT: Seeds MongoDB with the public company profile, one admin, three active staff accounts, and one pending staff invite.
+ * WHY: The first frontend, homepage, and staff-management flows need predictable data without demo customers or old queue history.
+ * HOW: Reset the small v1 collections, seed the company profile, hash seed passwords from env, and create the clean admin/staff dataset.
  */
 
 const bcrypt = require("bcryptjs");
@@ -23,6 +23,12 @@ const {
   CompanyProfile,
 } = require("../models/company-profile.model");
 const {
+  CustomerRegistrationVerification,
+} = require("../models/customer-registration-verification.model");
+const {
+  InternalChatThread,
+} = require("../models/internal-chat-thread.model");
+const {
   RefreshSession,
 } = require("../models/refresh-session.model");
 const {
@@ -38,16 +44,6 @@ const {
   logError,
   logInfo,
 } = require("./logger");
-const {
-  buildAiMessage,
-  buildCustomerMessage,
-  buildStaffMessage,
-  buildSystemMessage,
-} = require("./request-chat");
-const {
-  buildQueueCreatedAiText,
-} = require("./request-queue-ai");
-
 async function runSeed() {
   // WHY: Reuse the normal database bootstrap so seeding fails fast if the configured MongoDB is unavailable.
   await connectDatabase();
@@ -67,6 +63,8 @@ async function runSeed() {
   // WHY: Reset only the small v1 collections so the seeded relationships stay consistent for development.
   await Promise.all([
     CompanyProfile.deleteMany({}),
+    CustomerRegistrationVerification.deleteMany({}),
+    InternalChatThread.deleteMany({}),
     RefreshSession.deleteMany({}),
     ServiceRequest.deleteMany({}),
     StaffInvite.deleteMany({}),
@@ -283,7 +281,6 @@ async function runSeed() {
   const [
     adminPasswordHash,
     staffPasswordHash,
-    customerPasswordHash,
   ] = await Promise.all([
     bcrypt.hash(
       env.seedAdminPassword,
@@ -291,10 +288,6 @@ async function runSeed() {
     ),
     bcrypt.hash(
       env.seedStaffPassword,
-      12,
-    ),
-    bcrypt.hash(
-      env.seedCustomerPassword,
       12,
     ),
   ]);
@@ -335,265 +328,35 @@ async function runSeed() {
           STAFF_AVAILABILITIES.OFFLINE,
         passwordHash: staffPasswordHash,
       },
-    ]);
-
-  // WHY: Seed customers separately so request timelines and customer auth flows have predictable owners.
-  const customers =
-    await User.insertMany([
       {
-        firstName: "Michael",
-        lastName: "Braun",
-        email: "customer1@adams.local",
+        firstName: "Jonas",
+        lastName: "Hartmann",
+        email: "staff3@adams.local",
         phone: "+494444444444",
-        role: USER_ROLES.CUSTOMER,
+        role: USER_ROLES.STAFF,
         status: USER_STATUSES.ACTIVE,
-        passwordHash:
-          customerPasswordHash,
-      },
-      {
-        firstName: "Laura",
-        lastName: "Hoffmann",
-        email: "customer2@adams.local",
-        phone: "+495555555555",
-        role: USER_ROLES.CUSTOMER,
-        status: USER_STATUSES.ACTIVE,
-        passwordHash:
-          customerPasswordHash,
+        staffAvailability:
+          STAFF_AVAILABILITIES.ONLINE,
+        passwordHash: staffPasswordHash,
       },
     ]);
 
   // WHY: Keep one pending invite in the dataset so invite-based staff registration can be tested without setup.
   await StaffInvite.create({
     inviteId: "sample-invite-id",
-    firstName: "Elias",
-    lastName: "Becker",
+    firstName: "Mila",
+    lastName: "Schneider",
     email: "pending.staff@adams.local",
-    phone: "+496666666666",
+    phone: "+495555555555",
     invitedBy: admin._id,
     expiresAt: new Date(
       Date.now() +
         env.staffInviteTtlHours *
           60 *
           60 *
-          1000,
+      1000,
     ),
   });
-
-  // WHY: Seed requests across multiple statuses so admin, customer, and staff screens all show meaningful states.
-  await ServiceRequest.insertMany([
-    {
-      customer: customers[0]._id,
-      serviceType: "building_cleaning",
-      status:
-        REQUEST_STATUSES.SUBMITTED,
-      source: REQUEST_SOURCES.FORM,
-      location: {
-        addressLine1: "12 Clean Street",
-        city: "Monchengladbach",
-        postalCode: "41189",
-      },
-      preferredDate: new Date(
-        Date.now() +
-          3 * 24 * 60 * 60 * 1000,
-      ),
-      preferredTimeWindow: "Morning",
-      message:
-        "We need weekly building cleaning for our office floor.",
-      contactSnapshot: {
-        fullName: "Michael Braun",
-        email: "customer1@adams.local",
-        phone: "+494444444444",
-      },
-      assignedStaff: null,
-      queueEnteredAt: new Date(),
-      messages: [
-        buildCustomerMessage({
-          customerId: customers[0]._id,
-          customerName:
-            "Michael Braun",
-          text: "We need weekly building cleaning for our office floor.",
-        }),
-        buildSystemMessage(
-          "Your request is now in the live queue. A staff member will attend to it here.",
-        ),
-        buildAiMessage(
-          buildQueueCreatedAiText({
-            request: {
-              serviceType: "building_cleaning",
-              preferredTimeWindow: "Morning",
-              location: {
-                city: "Monchengladbach",
-              },
-              messages: [],
-            },
-            companyProfile: {
-              companyName: "CL Facility Management",
-            },
-          }),
-        ),
-      ],
-    },
-    {
-      customer: customers[1]._id,
-      serviceType: "warehouse_hall_cleaning",
-      status: REQUEST_STATUSES.ASSIGNED,
-      source: REQUEST_SOURCES.FORM,
-      location: {
-        addressLine1:
-          "45 Warehouse Lane",
-        city: "Dusseldorf",
-        postalCode: "40210",
-      },
-      preferredDate: new Date(
-        Date.now() +
-          5 * 24 * 60 * 60 * 1000,
-      ),
-      preferredTimeWindow: "Afternoon",
-      message:
-        "Please quote for monthly warehouse floor cleaning and machine dust removal.",
-      contactSnapshot: {
-        fullName: "Laura Hoffmann",
-        email: "customer2@adams.local",
-        phone: "+495555555555",
-      },
-      assignedStaff:
-        staffMembers[0]._id,
-      queueEnteredAt: new Date(
-        Date.now() -
-          4 * 60 * 60 * 1000,
-      ),
-      attendedAt: new Date(
-        Date.now() -
-          3 * 60 * 60 * 1000,
-      ),
-      messages: [
-        buildCustomerMessage({
-          customerId: customers[1]._id,
-          customerName:
-            "Laura Hoffmann",
-          text: "Please quote for monthly warehouse floor cleaning and machine dust removal.",
-        }),
-        buildSystemMessage(
-          "Daniel Weber joined your queue and can continue the conversation here.",
-        ),
-        buildStaffMessage({
-          staffId:
-            staffMembers[0]._id,
-          staffName:
-            "Daniel Weber",
-          text: "I am reviewing your warehouse request now and will prepare the next steps.",
-        }),
-      ],
-    },
-    {
-      customer: customers[0]._id,
-      serviceType: "window_glass_cleaning",
-      status: REQUEST_STATUSES.QUOTED,
-      source: REQUEST_SOURCES.FORM,
-      location: {
-        addressLine1: "99 Glass Road",
-        city: "Cologne",
-        postalCode: "50667",
-      },
-      preferredDate: new Date(
-        Date.now() +
-          7 * 24 * 60 * 60 * 1000,
-      ),
-      preferredTimeWindow: "Flexible",
-      message:
-        "Storefront window cleaning needed before next weekend.",
-      contactSnapshot: {
-        fullName: "Michael Braun",
-        email: "customer1@adams.local",
-        phone: "+494444444444",
-      },
-      assignedStaff:
-        staffMembers[1]._id,
-      queueEnteredAt: new Date(
-        Date.now() -
-          24 * 60 * 60 * 1000,
-      ),
-      attendedAt: new Date(
-        Date.now() -
-          23 * 60 * 60 * 1000,
-      ),
-      messages: [
-        buildCustomerMessage({
-          customerId: customers[0]._id,
-          customerName:
-            "Michael Braun",
-          text: "Storefront window cleaning needed before next weekend.",
-        }),
-        buildSystemMessage(
-          "Sofia Keller joined your queue and can continue the conversation here.",
-        ),
-        buildStaffMessage({
-          staffId:
-            staffMembers[1]._id,
-          staffName:
-            "Sofia Keller",
-          text: "Quote is being prepared and I will confirm the appointment details here.",
-        }),
-      ],
-    },
-    {
-      customer: customers[1]._id,
-      serviceType: "caretaker_service",
-      status: REQUEST_STATUSES.CLOSED,
-      source: REQUEST_SOURCES.CHAT,
-      location: {
-        addressLine1:
-          "7 Garden Court",
-        city: "Essen",
-        postalCode: "45127",
-      },
-      preferredDate: new Date(
-        Date.now() -
-          2 * 24 * 60 * 60 * 1000,
-      ),
-      preferredTimeWindow: "Morning",
-      message:
-        "Caretaker follow-up needed after a completed weekend visit.",
-      contactSnapshot: {
-        fullName: "Laura Hoffmann",
-        email: "customer2@adams.local",
-        phone: "+495555555555",
-      },
-      assignedStaff:
-        staffMembers[0]._id,
-      queueEnteredAt: new Date(
-        Date.now() -
-          3 * 24 * 60 * 60 * 1000,
-      ),
-      attendedAt: new Date(
-        Date.now() -
-          3 * 24 * 60 * 60 * 1000 +
-          2 * 60 * 60 * 1000,
-      ),
-      closedAt: new Date(),
-      messages: [
-        buildCustomerMessage({
-          customerId: customers[1]._id,
-          customerName:
-            "Laura Hoffmann",
-          text: "Caretaker follow-up needed after a completed weekend visit.",
-        }),
-        buildSystemMessage(
-          "Daniel Weber joined your queue and can continue the conversation here.",
-        ),
-        buildStaffMessage({
-          staffId:
-            staffMembers[0]._id,
-          staffName:
-            "Daniel Weber",
-          text: "I handled the follow-up and closed the queue for this request.",
-        }),
-        buildSystemMessage(
-          "Request status changed to closed.",
-        ),
-      ],
-    },
-  ]);
 
   logInfo({
     requestId: "seed",
