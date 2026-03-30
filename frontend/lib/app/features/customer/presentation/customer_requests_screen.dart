@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/models/service_request_model.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/presentation/presence_chip.dart';
 import '../../../shared/presentation/request_message_composer.dart';
 import '../../../shared/presentation/request_thread_section.dart';
@@ -53,6 +54,7 @@ class CustomerRequestsScreen extends ConsumerStatefulWidget {
 
 class _CustomerRequestsScreenState
     extends ConsumerState<CustomerRequestsScreen> {
+  final ScrollController _threadScrollController = ScrollController();
   final Map<String, TextEditingController> _messageControllers =
       <String, TextEditingController>{};
   final Map<String, DateTime> _lastViewedActivityByRequestId =
@@ -67,6 +69,7 @@ class _CustomerRequestsScreenState
   final Map<String, String> _paymentProofUploadErrorsByRequestId =
       <String, String>{};
   final Set<String> _refreshingInvoiceIds = <String>{};
+  String? _lastThreadScrollSignature;
   _CustomerInboxFilter _selectedFilter = _CustomerInboxFilter.all;
   _CustomerWorkspaceTab _selectedWorkspaceTab = _CustomerWorkspaceTab.inbox;
   String? _selectedRequestId;
@@ -77,6 +80,7 @@ class _CustomerRequestsScreenState
     for (final controller in _messageControllers.values) {
       controller.dispose();
     }
+    _threadScrollController.dispose();
     super.dispose();
   }
 
@@ -266,10 +270,35 @@ class _CustomerRequestsScreenState
   }
 
   void _openRequest(ServiceRequestModel request) {
+    _lastThreadScrollSignature = null;
     setState(() {
       _selectedRequestId = request.id;
       _selectedWorkspaceTab = _CustomerWorkspaceTab.chat;
       _markRequestViewed(request);
+    });
+  }
+
+  void _scheduleThreadScrollToLatest(ServiceRequestModel? request) {
+    if (request == null) {
+      _lastThreadScrollSignature = null;
+      return;
+    }
+
+    final signature =
+        '${request.id}:${request.latestActivityAt?.millisecondsSinceEpoch ?? 0}:${request.messageCount}';
+    if (_lastThreadScrollSignature == signature) {
+      return;
+    }
+
+    _lastThreadScrollSignature = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_threadScrollController.hasClients) {
+        return;
+      }
+
+      _threadScrollController.jumpTo(
+        _threadScrollController.position.maxScrollExtent,
+      );
     });
   }
 
@@ -1131,7 +1160,15 @@ class _CustomerRequestsScreenState
 
   IconData _serviceIcon(String serviceType) {
     return switch (serviceType) {
+      'fire_damage_cleaning' => Icons.local_fire_department_rounded,
+      'needle_sweeps_sharps_cleanups' => Icons.health_and_safety_rounded,
+      'hoarding_cleanups' => Icons.inventory_2_rounded,
+      'trauma_decomposition_cleanups' => Icons.healing_rounded,
+      'infection_control_cleaning' => Icons.coronavirus_rounded,
       'building_cleaning' => Icons.apartment_rounded,
+      'window_cleaning' => Icons.window_rounded,
+      'office_cleaning' => Icons.business_center_rounded,
+      'house_cleaning' => Icons.house_rounded,
       'warehouse_hall_cleaning' => Icons.warehouse_rounded,
       'window_glass_cleaning' => Icons.window_rounded,
       'winter_service' => Icons.ac_unit_rounded,
@@ -1144,7 +1181,15 @@ class _CustomerRequestsScreenState
 
   Color _serviceAccent(String serviceType) {
     return switch (serviceType) {
+      'fire_damage_cleaning' => const Color(0xFFC65A3A),
+      'needle_sweeps_sharps_cleanups' => const Color(0xFF4B7A92),
+      'hoarding_cleanups' => const Color(0xFF8A684E),
+      'trauma_decomposition_cleanups' => const Color(0xFF6B5A88),
+      'infection_control_cleaning' => const Color(0xFF2E7F73),
       'building_cleaning' => AppTheme.cobalt,
+      'window_cleaning' => const Color(0xFF4A7FB9),
+      'office_cleaning' => const Color(0xFF47668F),
+      'house_cleaning' => const Color(0xFF6A6F90),
       'warehouse_hall_cleaning' => AppTheme.ember,
       'window_glass_cleaning' => const Color(0xFF4A7FB9),
       'winter_service' => const Color(0xFF5A86C6),
@@ -1769,6 +1814,7 @@ class _CustomerRequestsScreenState
                     children: <Widget>[
                       Expanded(
                         child: SingleChildScrollView(
+                          controller: _threadScrollController,
                           padding: EdgeInsets.fromLTRB(
                             edgeToEdge ? 14 : 18,
                             edgeToEdge ? 12 : 18,
@@ -1776,6 +1822,7 @@ class _CustomerRequestsScreenState
                             16,
                           ),
                           child: RequestThreadSection(
+                            key: ValueKey<String>(request.id),
                             messages: request.messages,
                             viewerRole: 'customer',
                             dark: true,
@@ -1967,6 +2014,16 @@ class _CustomerRequestsScreenState
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
+      next.whenData((event) {
+        if (!event.affectsRequests) {
+          return;
+        }
+
+        ref.invalidate(customerRequestsProvider);
+      });
+    });
+
     final authState = ref.watch(authControllerProvider);
     final requestsAsync = ref.watch(customerRequestsProvider);
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -2058,6 +2115,7 @@ class _CustomerRequestsScreenState
 
                     if (isConversationVisible) {
                       _scheduleMarkRequestViewed(selectedRequest);
+                      _scheduleThreadScrollToLatest(selectedRequest);
                     }
 
                     if (requests.isEmpty) {

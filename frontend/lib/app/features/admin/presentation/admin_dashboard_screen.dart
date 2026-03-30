@@ -10,10 +10,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
+import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/data/internal_chat_repository.dart';
 import '../../../shared/presentation/invoice_draft_dialog.dart';
 import '../../../shared/presentation/workspace_bottom_nav.dart';
 import '../../../shared/utils/external_url_opener.dart';
+import '../../../shared/utils/request_attachment_picker.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../staff/presentation/staff_internal_chat_screen.dart';
 import '../data/admin_repository.dart';
@@ -86,11 +88,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   final _inviteEmailController = TextEditingController();
   final _invitePhoneController = TextEditingController();
   final _requestSearchController = TextEditingController();
+  final ScrollController _requestThreadScrollController = ScrollController();
+  final Map<String, TextEditingController> _messageControllers =
+      <String, TextEditingController>{};
   final Map<String, String?> _selectedAssignments = <String, String?>{};
   final Set<String> _assigningRequestIds = <String>{};
   final Set<String> _inviteIdsBeingDeleted = <String>{};
+  final Set<String> _sendingMessageRequestIds = <String>{};
   final Set<String> _sendingInvoiceRequestIds = <String>{};
+  final Set<String> _uploadingAttachmentRequestIds = <String>{};
   final Set<String> _reviewingPaymentProofRequestIds = <String>{};
+  String? _lastThreadScrollSignature;
   _AdminTab _selectedTab = _AdminTab.overview;
   _AdminRequestFilter _selectedRequestFilter = _AdminRequestFilter.all;
   String _appliedSearchQuery = '';
@@ -99,12 +107,23 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
   @override
   void dispose() {
+    for (final controller in _messageControllers.values) {
+      controller.dispose();
+    }
     _inviteFirstNameController.dispose();
     _inviteLastNameController.dispose();
     _inviteEmailController.dispose();
     _invitePhoneController.dispose();
     _requestSearchController.dispose();
+    _requestThreadScrollController.dispose();
     super.dispose();
+  }
+
+  TextEditingController _controllerFor(String requestId) {
+    return _messageControllers.putIfAbsent(
+      requestId,
+      () => TextEditingController(),
+    );
   }
 
   Future<void> _submitInvite() async {
@@ -193,6 +212,111 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _assigningRequestIds.remove(requestId));
+      }
+    }
+  }
+
+  Future<void> _sendRequestMessage(ServiceRequestModel request) async {
+    if (request.status == 'closed') {
+      return;
+    }
+
+    final controller = _controllerFor(request.id);
+    final text = controller.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+
+    setState(() => _sendingMessageRequestIds.add(request.id));
+    debugPrint(
+      'AdminDashboardScreen._sendRequestMessage: sending reply for ${request.id}',
+    );
+
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .sendMessage(requestId: request.id, message: text);
+      controller.clear();
+      ref.invalidate(adminDashboardProvider);
+      ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Reply sent')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sendingMessageRequestIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _uploadRequestAttachment(ServiceRequestModel request) async {
+    if (request.status == 'closed') {
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    final pickedFile = await pickRequestAttachmentFile();
+    if (pickedFile == null) {
+      return;
+    }
+
+    final controller = _controllerFor(request.id);
+    final caption = controller.text.trim();
+
+    setState(() => _uploadingAttachmentRequestIds.add(request.id));
+    debugPrint(
+      'AdminDashboardScreen._uploadRequestAttachment: uploading attachment for ${request.id}',
+    );
+
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .uploadRequestAttachment(
+            requestId: request.id,
+            bytes: pickedFile.bytes,
+            fileName: pickedFile.name,
+            mimeType: pickedFile.mimeType,
+            caption: caption.isEmpty ? null : caption,
+          );
+      controller.clear();
+      ref.invalidate(adminDashboardProvider);
+      ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Attachment sent')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _uploadingAttachmentRequestIds.remove(request.id));
       }
     }
   }
@@ -485,6 +609,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   void _openRequestFromOverview(ServiceRequestModel request) {
+    _lastThreadScrollSignature = null;
     setState(() {
       _selectedTab = _AdminTab.queue;
       _selectedRequestFilter = _filterForRequest(request);
@@ -495,12 +620,37 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   }
 
   void _openQueueOverview() {
+    _lastThreadScrollSignature = null;
     setState(() {
       _selectedTab = _AdminTab.queue;
       _selectedRequestFilter = _AdminRequestFilter.all;
       _selectedRequestId = null;
       _appliedSearchQuery = '';
       _requestSearchController.clear();
+    });
+  }
+
+  void _scheduleThreadScrollToLatest(ServiceRequestModel? request) {
+    if (request == null) {
+      _lastThreadScrollSignature = null;
+      return;
+    }
+
+    final signature =
+        '${request.id}:${request.latestActivityAt?.millisecondsSinceEpoch ?? 0}:${request.messageCount}';
+    if (_lastThreadScrollSignature == signature) {
+      return;
+    }
+
+    _lastThreadScrollSignature = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_requestThreadScrollController.hasClients) {
+        return;
+      }
+
+      _requestThreadScrollController.jumpTo(
+        _requestThreadScrollController.position.maxScrollExtent,
+      );
     });
   }
 
@@ -605,6 +755,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     return requestsAsync.when(
       data: (List<ServiceRequestModel> requests) {
         final selectedRequest = _resolveSelectedRequest(requests);
+        _scheduleThreadScrollToLatest(selectedRequest);
         final validStaffIds = bundle.staff.map((staff) => staff.id).toSet();
         final selectedAssignmentId = selectedRequest == null
             ? null
@@ -637,6 +788,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       requests: requests,
                       selectedRequestId: selectedRequest?.id,
                       onSelectRequest: (request) {
+                        _lastThreadScrollSignature = null;
                         setState(() => _selectedRequestId = request.id);
                       },
                     ),
@@ -699,6 +851,29 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                               decision: 'rejected',
                             )
                           : null,
+                      messageController: selectedRequest == null
+                          ? null
+                          : _controllerFor(selectedRequest.id),
+                      isSendingMessage:
+                          selectedRequest != null &&
+                          _sendingMessageRequestIds.contains(
+                            selectedRequest.id,
+                          ),
+                      isUploadingAttachment:
+                          selectedRequest != null &&
+                          _uploadingAttachmentRequestIds.contains(
+                            selectedRequest.id,
+                          ),
+                      composerEnabled:
+                          selectedRequest != null &&
+                          selectedRequest.status != 'closed',
+                      onSendMessage: selectedRequest == null
+                          ? null
+                          : () => _sendRequestMessage(selectedRequest),
+                      onUploadAttachment: selectedRequest == null
+                          ? null
+                          : () => _uploadRequestAttachment(selectedRequest),
+                      threadScrollController: _requestThreadScrollController,
                       isSendingInvoice:
                           selectedRequest != null &&
                           _sendingInvoiceRequestIds.contains(
@@ -761,12 +936,27 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                         decision: 'rejected',
                       )
                     : null,
+                messageController: _controllerFor(selectedRequest.id),
+                isSendingMessage: _sendingMessageRequestIds.contains(
+                  selectedRequest.id,
+                ),
+                isUploadingAttachment: _uploadingAttachmentRequestIds.contains(
+                  selectedRequest.id,
+                ),
+                composerEnabled: selectedRequest.status != 'closed',
+                onSendMessage: () => _sendRequestMessage(selectedRequest),
+                onUploadAttachment: () =>
+                    _uploadRequestAttachment(selectedRequest),
                 isSendingInvoice: _sendingInvoiceRequestIds.contains(
                   selectedRequest.id,
                 ),
                 isReviewingPaymentProof: _reviewingPaymentProofRequestIds
                     .contains(selectedRequest.id),
-                onBack: () => setState(() => _selectedRequestId = null),
+                onBack: () {
+                  _lastThreadScrollSignature = null;
+                  setState(() => _selectedRequestId = null);
+                },
+                threadScrollController: _requestThreadScrollController,
               );
             }
 
@@ -779,6 +969,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               requests: requests,
               selectedRequestId: selectedRequest?.id,
               onSelectRequest: (request) {
+                _lastThreadScrollSignature = null;
                 setState(() => _selectedRequestId = request.id);
               },
             );
@@ -916,6 +1107,17 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
+      next.whenData((event) {
+        if (!event.affectsRequests) {
+          return;
+        }
+
+        ref.invalidate(adminDashboardProvider);
+        ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+      });
+    });
+
     final bundleAsync = ref.watch(adminDashboardProvider);
     final requestsAsync = ref.watch(
       adminRequestsProvider(_currentRequestQuery()),

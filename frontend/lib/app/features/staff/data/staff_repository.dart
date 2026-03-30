@@ -3,6 +3,7 @@
 /// HOW: Use the shared API client to fetch the dashboard snapshot and send small queue, availability, status, and message actions.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/dashboard_models.dart';
@@ -18,6 +19,40 @@ class StaffRepository {
   const StaffRepository(this._client);
 
   final ApiClient _client;
+
+  String _normalizedUploadMimeType(String fileName, String mimeType) {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.isNotEmpty &&
+        normalizedMimeType != 'application/octet-stream') {
+      return normalizedMimeType;
+    }
+
+    final lowerCaseFileName = fileName.toLowerCase();
+    if (lowerCaseFileName.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lowerCaseFileName.endsWith('.jpg') ||
+        lowerCaseFileName.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lowerCaseFileName.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lowerCaseFileName.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (lowerCaseFileName.endsWith('.txt')) {
+      return 'text/plain';
+    }
+    if (lowerCaseFileName.endsWith('.doc')) {
+      return 'application/msword';
+    }
+    if (lowerCaseFileName.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+
+    return 'application/octet-stream';
+  }
 
   Future<AuthSession> registerFromInvite({
     required String inviteToken,
@@ -82,6 +117,29 @@ class StaffRepository {
     await _client.postJson(
       '/staff/requests/$requestId/messages',
       data: <String, dynamic>{'message': message, 'actionType': actionType},
+    );
+  }
+
+  Future<void> uploadRequestAttachment({
+    required String requestId,
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+    String? caption,
+  }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+
+    await _client.postFormData(
+      '/staff/requests/$requestId/messages/attachment',
+      createData: () => FormData.fromMap(<String, dynamic>{
+        'attachment': MultipartFile.fromBytes(
+          bytes,
+          filename: fileName,
+          contentType: DioMediaType.parse(resolvedMimeType),
+        ),
+        if (caption != null && caption.trim().isNotEmpty)
+          'caption': caption.trim(),
+      }),
     );
   }
 

@@ -8,12 +8,29 @@ import 'dart:typed_data';
 
 import 'request_attachment_picker_types.dart';
 
+const _allAttachmentAcceptValue =
+    '.png,.jpg,.jpeg,.webp,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const _imageOnlyAcceptValue =
+    '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
+
 Future<PickedRequestAttachmentFile?> pickRequestAttachmentFile() async {
-  final completer = Completer<PickedRequestAttachmentFile?>();
+  final files = await pickRequestAttachmentFiles();
+  if (files.isEmpty) {
+    return null;
+  }
+
+  return files.first;
+}
+
+Future<List<PickedRequestAttachmentFile>> pickRequestAttachmentFiles({
+  int maxFiles = 1,
+  bool imagesOnly = false,
+}) async {
+  final safeMaxFiles = maxFiles < 1 ? 1 : maxFiles;
+  final completer = Completer<List<PickedRequestAttachmentFile>>();
   final input = html.FileUploadInputElement()
-    ..accept =
-        '.png,.jpg,.jpeg,.webp,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ..multiple = false
+    ..accept = imagesOnly ? _imageOnlyAcceptValue : _allAttachmentAcceptValue
+    ..multiple = safeMaxFiles > 1
     ..style.display = 'none';
 
   html.document.body?.append(input);
@@ -22,17 +39,10 @@ Future<PickedRequestAttachmentFile?> pickRequestAttachmentFile() async {
     input.remove();
   }
 
-  input.onChange.listen((_) {
-    final file = input.files?.first;
-    if (file == null) {
-      cleanup();
-      if (!completer.isCompleted) {
-        completer.complete(null);
-      }
-      return;
-    }
-
+  Future<PickedRequestAttachmentFile?> readFile(html.File file) async {
+    final completer = Completer<PickedRequestAttachmentFile?>();
     final reader = html.FileReader();
+
     reader.onLoadEnd.listen((_) {
       final result = reader.result;
       final bytes = switch (result) {
@@ -40,7 +50,6 @@ Future<PickedRequestAttachmentFile?> pickRequestAttachmentFile() async {
         Uint8List value => value,
         _ => null,
       };
-      cleanup();
 
       if (bytes == null) {
         if (!completer.isCompleted) {
@@ -63,16 +72,52 @@ Future<PickedRequestAttachmentFile?> pickRequestAttachmentFile() async {
         );
       }
     });
+
     reader.onError.listen((_) {
-      cleanup();
       if (!completer.isCompleted) {
         completer.completeError(
           StateError('Browser could not read the selected attachment.'),
         );
       }
     });
+
     reader.readAsArrayBuffer(file);
+    return completer.future;
+  }
+
+  input.onChange.listen((_) async {
+    final selectedFiles = input.files;
+    if (selectedFiles == null || selectedFiles.isEmpty) {
+      cleanup();
+      if (!completer.isCompleted) {
+        completer.complete(const <PickedRequestAttachmentFile>[]);
+      }
+      return;
+    }
+
+    try {
+      final items = <PickedRequestAttachmentFile>[];
+      final limitedFiles = selectedFiles.take(safeMaxFiles);
+
+      for (final file in limitedFiles) {
+        final pickedFile = await readFile(file);
+        if (pickedFile != null) {
+          items.add(pickedFile);
+        }
+      }
+
+      cleanup();
+      if (!completer.isCompleted) {
+        completer.complete(items);
+      }
+    } catch (error) {
+      cleanup();
+      if (!completer.isCompleted) {
+        completer.completeError(error);
+      }
+    }
   });
+
   input.click();
 
   return completer.future;

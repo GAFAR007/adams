@@ -6,8 +6,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../config/app_config.dart';
 import '../../../core/models/public_company_profile.dart';
+import '../../../core/network/api_client.dart';
 import '../../../theme/app_theme.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../auth/data/auth_repository.dart';
 import '../data/public_repository.dart';
 import '../data/public_service_concierge_repository.dart';
 import 'public_site_shell.dart';
@@ -139,6 +141,10 @@ class _PublicBookingChatScreenState
       return _BookingStep.email;
     }
 
+    if (_draft.verificationToken.isEmpty) {
+      return _BookingStep.emailCode;
+    }
+
     if (_draft.phone.isEmpty) {
       return _BookingStep.phone;
     }
@@ -167,6 +173,9 @@ class _PublicBookingChatScreenState
     }
     if (_draft.email.isNotEmpty) {
       steps.add('email');
+    }
+    if (_draft.verificationToken.isNotEmpty) {
+      steps.add('emailVerified');
     }
     if (_draft.phone.isNotEmpty) {
       steps.add('phone');
@@ -209,6 +218,16 @@ class _PublicBookingChatScreenState
       return;
     }
 
+    if (step == _BookingStep.email) {
+      await _handleEmailStep(rawInput);
+      return;
+    }
+
+    if (step == _BookingStep.emailCode) {
+      await _handleEmailCodeStep(rawInput);
+      return;
+    }
+
     var userVisibleText = rawInput;
     if (step == _BookingStep.service) {
       final service = selectedService ?? _matchService(profile, rawInput);
@@ -223,9 +242,6 @@ class _PublicBookingChatScreenState
       _draft.firstName = rawInput;
     } else if (step == _BookingStep.lastName) {
       _draft.lastName = rawInput;
-    } else if (step == _BookingStep.email) {
-      _draft.email = rawInput.toLowerCase();
-      userVisibleText = _draft.email;
     } else if (step == _BookingStep.phone) {
       _draft.phone = rawInput;
     } else if (step == _BookingStep.password) {
@@ -329,8 +345,17 @@ class _PublicBookingChatScreenState
     }
 
     if (step == _BookingStep.email) {
-      final validEmail = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
-      return validEmail ? null : _invalidEmailMessage();
+      return _isValidEmailAddress(value) ? null : _invalidEmailMessage();
+    }
+
+    if (step == _BookingStep.emailCode) {
+      if (_looksLikeEmailAddress(value)) {
+        return _isValidEmailAddress(value) ? null : _invalidEmailMessage();
+      }
+
+      return _looksLikeVerificationCode(value)
+          ? null
+          : _invalidVerificationCodeMessage();
     }
 
     if (step == _BookingStep.phone) {
@@ -368,6 +393,194 @@ class _PublicBookingChatScreenState
     return null;
   }
 
+  Future<void> _handleEmailStep(String rawInput) async {
+    final email = rawInput.toLowerCase();
+    _inputController.clear();
+
+    setState(() {
+      _messages.add(_BookingChatMessage.user(text: email));
+      _isSending = true;
+    });
+    _scrollToBottom();
+
+    try {
+      await ref
+          .read(authRepositoryProvider)
+          .requestCustomerRegistrationCode(email: email);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _draft.email = email;
+        _draft.verificationToken = '';
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: _verificationCodeSentMessage(email),
+          ),
+        );
+        _isSending = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: error.errorCode == 'CUSTOMER_REGISTER_EMAIL_TAKEN'
+                ? _emailAlreadyRegisteredMessage(email)
+                : _composeApiErrorMessage(error),
+          ),
+        );
+        _isSending = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: _verificationCodeSendFailureMessage(),
+          ),
+        );
+        _isSending = false;
+      });
+    }
+
+    _scrollToBottom();
+  }
+
+  Future<void> _handleEmailCodeStep(String rawInput) async {
+    if (_looksLikeEmailAddress(rawInput)) {
+      await _handleReplacementEmail(rawInput.toLowerCase());
+      return;
+    }
+
+    _inputController.clear();
+
+    setState(() {
+      _messages.add(
+        _BookingChatMessage.user(
+          text: _language == PublicSiteLanguage.german
+              ? 'Bestaetigungscode eingegeben'
+              : 'Verification code entered',
+        ),
+      );
+      _isSending = true;
+    });
+    _scrollToBottom();
+
+    try {
+      final verificationToken = await ref
+          .read(authRepositoryProvider)
+          .verifyCustomerRegistrationCode(email: _draft.email, code: rawInput);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _draft.verificationToken = verificationToken;
+        _messages.add(
+          _BookingChatMessage.assistant(text: _emailVerifiedReply()),
+        );
+        _isSending = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(text: _composeApiErrorMessage(error)),
+        );
+        _isSending = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: _invalidVerificationCodeMessage(),
+          ),
+        );
+        _isSending = false;
+      });
+    }
+
+    _scrollToBottom();
+  }
+
+  Future<void> _handleReplacementEmail(String email) async {
+    _inputController.clear();
+
+    setState(() {
+      _messages.add(_BookingChatMessage.user(text: email));
+      _isSending = true;
+    });
+    _scrollToBottom();
+
+    try {
+      await ref
+          .read(authRepositoryProvider)
+          .requestCustomerRegistrationCode(email: email);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _draft.email = email;
+        _draft.verificationToken = '';
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: _verificationCodeResentMessage(email),
+          ),
+        );
+        _isSending = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: error.errorCode == 'CUSTOMER_REGISTER_EMAIL_TAKEN'
+                ? _emailAlreadyRegisteredMessage(email)
+                : _composeApiErrorMessage(error),
+          ),
+        );
+        _isSending = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages.add(
+          _BookingChatMessage.assistant(
+            text: _verificationCodeSendFailureMessage(),
+          ),
+        );
+        _isSending = false;
+      });
+    }
+
+    _scrollToBottom();
+  }
+
   void _pushAssistantMessage(String text) {
     setState(() {
       _messages.add(_BookingChatMessage.assistant(text: text));
@@ -381,6 +594,8 @@ class _PublicBookingChatScreenState
         _BookingStep.firstName => 'Bitte geben Sie Ihren Vornamen ein.',
         _BookingStep.lastName => 'Bitte geben Sie Ihren Nachnamen ein.',
         _BookingStep.email => 'Bitte geben Sie Ihre E-Mail-Adresse ein.',
+        _BookingStep.emailCode =>
+          'Bitte geben Sie den 6-stelligen Code aus Ihrer E-Mail ein.',
         _BookingStep.phone => 'Bitte geben Sie Ihre Telefonnummer ein.',
         _BookingStep.password => 'Bitte geben Sie ein Passwort ein.',
         _BookingStep.confirmPassword => 'Bitte bestaetigen Sie Ihr Passwort.',
@@ -392,6 +607,8 @@ class _PublicBookingChatScreenState
       _BookingStep.firstName => 'Please enter your first name.',
       _BookingStep.lastName => 'Please enter your last name.',
       _BookingStep.email => 'Please enter your email address.',
+      _BookingStep.emailCode =>
+        'Please enter the 6-digit code from your email.',
       _BookingStep.phone => 'Please enter your phone number.',
       _BookingStep.password => 'Please create a password.',
       _BookingStep.confirmPassword => 'Please confirm your password.',
@@ -409,6 +626,67 @@ class _PublicBookingChatScreenState
     return _language == PublicSiteLanguage.german
         ? 'Bitte geben Sie eine gultige E-Mail-Adresse ein.'
         : 'Please enter a valid email address.';
+  }
+
+  String _composeApiErrorMessage(ApiException error) {
+    final hint = error.resolutionHint?.trim() ?? '';
+    if (hint.isEmpty) {
+      return error.message;
+    }
+
+    if (_language == PublicSiteLanguage.german) {
+      return '${error.message}. Hinweis: $hint.';
+    }
+
+    return '${error.message}. Hint: $hint.';
+  }
+
+  bool _isValidEmailAddress(String value) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
+  }
+
+  bool _looksLikeEmailAddress(String value) {
+    return value.contains('@');
+  }
+
+  bool _looksLikeVerificationCode(String value) {
+    return RegExp(r'^\d{6}$').hasMatch(value.trim());
+  }
+
+  String _invalidVerificationCodeMessage() {
+    return _language == PublicSiteLanguage.german
+        ? 'Bitte geben Sie den 6-stelligen Code aus Ihrer E-Mail ein oder tragen Sie eine andere E-Mail-Adresse ein.'
+        : 'Enter the 6-digit code from your email, or type a different email address.';
+  }
+
+  String _verificationCodeSentMessage(String email) {
+    return _language == PublicSiteLanguage.german
+        ? 'Perfekt. Ich habe einen 6-stelligen Code an $email gesendet. Geben Sie ihn jetzt hier ein. Wenn Sie eine andere E-Mail verwenden mochten, schicken Sie einfach die neue Adresse.'
+        : 'Perfect. I sent a 6-digit code to $email. Enter it here next. If you want to use a different email, just send the new address.';
+  }
+
+  String _verificationCodeResentMessage(String email) {
+    return _language == PublicSiteLanguage.german
+        ? 'Danke. Ich habe einen neuen 6-stelligen Code an $email gesendet. Geben Sie ihn hier ein, sobald er angekommen ist.'
+        : 'Thanks. I sent a fresh 6-digit code to $email. Enter it here as soon as it arrives.';
+  }
+
+  String _verificationCodeSendFailureMessage() {
+    return _language == PublicSiteLanguage.german
+        ? 'Ich konnte den Bestatigungscode gerade nicht senden. Versuchen Sie es bitte gleich noch einmal.'
+        : 'I could not send the verification code right now. Please try again in a moment.';
+  }
+
+  String _emailAlreadyRegisteredMessage(String email) {
+    return _language == PublicSiteLanguage.german
+        ? 'Die Adresse $email ist bereits registriert. Melden Sie sich bitte stattdessen an. Wenn Sie das Passwort nicht mehr haben, fordern Sie bitte einen Passwort-Reset beim Support an.'
+        : 'The email $email already has an account. Please log in instead. If you no longer have the password, request a password reset from support.';
+  }
+
+  String _emailVerifiedReply() {
+    return _language == PublicSiteLanguage.german
+        ? 'Perfekt. Ihre E-Mail ist bestatigt. Welche Telefonnummer sollen wir fur Ruckfragen verwenden?'
+        : 'Perfect. Your email is verified. What phone number should we use if the team needs to reach you quickly?';
   }
 
   bool _looksLikePhoneNumber(String value) {
@@ -464,6 +742,8 @@ class _PublicBookingChatScreenState
         _BookingStep.lastName => 'Danke. Wie lautet Ihr Nachname?',
         _BookingStep.email =>
           'Welche E-Mail-Adresse sollen wir fur Ihren Zugang verwenden?',
+        _BookingStep.emailCode =>
+          'Bitte geben Sie jetzt den 6-stelligen Code aus Ihrer E-Mail ein.',
         _BookingStep.phone =>
           'Welche Telefonnummer sollen wir fur Ruckfragen verwenden?',
         _BookingStep.password =>
@@ -480,6 +760,7 @@ class _PublicBookingChatScreenState
       _BookingStep.firstName => 'Perfect. What is your first name?',
       _BookingStep.lastName => 'Thanks. What is your last name?',
       _BookingStep.email => 'What email address should we use for your access?',
+      _BookingStep.emailCode => 'Enter the 6-digit code from your email now.',
       _BookingStep.phone =>
         'What phone number should we use if the team needs to reach you quickly?',
       _BookingStep.password =>
@@ -507,6 +788,7 @@ class _PublicBookingChatScreenState
             email: _draft.email,
             phone: _draft.phone,
             password: _draft.password,
+            verificationToken: _draft.verificationToken,
           );
 
       if (!mounted) {
@@ -1024,6 +1306,7 @@ class _PublicBookingChatScreenState
         _BookingStep.firstName => 'Vorname',
         _BookingStep.lastName => 'Nachname',
         _BookingStep.email => 'E-Mail-Adresse',
+        _BookingStep.emailCode => '6-stelliger Code oder neue E-Mail',
         _BookingStep.phone => 'Telefonnummer',
         _BookingStep.password => 'Passwort mit mindestens 8 Zeichen',
         _BookingStep.confirmPassword => 'Passwort bestaetigen',
@@ -1036,6 +1319,7 @@ class _PublicBookingChatScreenState
       _BookingStep.firstName => 'First name',
       _BookingStep.lastName => 'Last name',
       _BookingStep.email => 'Email address',
+      _BookingStep.emailCode => '6-digit code or different email',
       _BookingStep.phone => 'Phone number',
       _BookingStep.password => 'Password with at least 8 characters',
       _BookingStep.confirmPassword => 'Confirm password',
@@ -1070,6 +1354,11 @@ class _PublicBookingChatScreenState
         label: _language == PublicSiteLanguage.german ? 'E-Mail' : 'Email',
         isActive: current == _BookingStep.email,
         isComplete: _draft.email.isNotEmpty,
+      ),
+      _ProgressChipData(
+        label: _language == PublicSiteLanguage.german ? 'Code' : 'Verify email',
+        isActive: current == _BookingStep.emailCode,
+        isComplete: _draft.verificationToken.isNotEmpty,
       ),
       _ProgressChipData(
         label: _language == PublicSiteLanguage.german ? 'Telefon' : 'Phone',
@@ -1121,6 +1410,7 @@ class _BookingDraft {
   String firstName = '';
   String lastName = '';
   String email = '';
+  String verificationToken = '';
   String phone = '';
   String password = '';
   String passwordConfirmation = '';
@@ -1208,6 +1498,7 @@ enum _BookingStep {
   firstName('firstName'),
   lastName('lastName'),
   email('email'),
+  emailCode('emailCode'),
   phone('phone'),
   password('password'),
   confirmPassword('password'),

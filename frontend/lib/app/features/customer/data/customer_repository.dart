@@ -65,7 +65,7 @@ class CustomerRepository {
     return requests;
   }
 
-  Future<void> createRequest({
+  Future<ServiceRequestModel> createRequest({
     required String serviceType,
     required String addressLine1,
     required String city,
@@ -74,7 +74,7 @@ class CustomerRepository {
     required String preferredTimeWindow,
     required String message,
   }) async {
-    await _client.postJson(
+    final response = await _client.postJson(
       '/customer/requests',
       data: <String, dynamic>{
         'serviceType': serviceType,
@@ -86,6 +86,44 @@ class CustomerRepository {
         'message': message,
       },
     );
+
+    return ServiceRequestModel.fromJson(
+      response['request'] as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
+  }
+
+  Future<AddressVerificationResult> verifyAddress({
+    required String addressLine1,
+    String? placeId,
+  }) async {
+    final response = await _client.postJson(
+      '/customer/address/verify',
+      data: <String, dynamic>{
+        'addressLine1': addressLine1,
+        if (placeId != null && placeId.trim().isNotEmpty) 'placeId': placeId,
+      },
+    );
+
+    return AddressVerificationResult.fromJson(
+      response['verification'] as Map<String, dynamic>? ??
+          const <String, dynamic>{},
+    );
+  }
+
+  Future<List<AddressPredictionResult>> autocompleteAddress({
+    required String input,
+  }) async {
+    final response = await _client.getJson(
+      '/customer/address/autocomplete',
+      queryParameters: <String, dynamic>{'input': input},
+    );
+
+    final items =
+        response['predictions'] as List<dynamic>? ?? const <dynamic>[];
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(AddressPredictionResult.fromJson)
+        .toList(growable: false);
   }
 
   Future<void> updateRequest({
@@ -166,6 +204,68 @@ class CustomerRepository {
         if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
       }),
       onSendProgress: onSendProgress,
+    );
+  }
+}
+
+class AddressVerificationResult {
+  const AddressVerificationResult({
+    required this.status,
+    required this.provider,
+    required this.addressLine1,
+    required this.city,
+    required this.postalCode,
+    required this.formattedAddress,
+    required this.countryCode,
+    required this.resolutionHint,
+  });
+
+  final String status;
+  final String provider;
+  final String addressLine1;
+  final String city;
+  final String postalCode;
+  final String formattedAddress;
+  final String countryCode;
+  final String resolutionHint;
+
+  bool get isVerified => status == 'verified';
+  bool get isUnavailable => status == 'unavailable';
+  bool get isNotFound => status == 'not_found';
+
+  factory AddressVerificationResult.fromJson(Map<String, dynamic> json) {
+    return AddressVerificationResult(
+      status: json['status'] as String? ?? 'unavailable',
+      provider: json['provider'] as String? ?? 'disabled',
+      addressLine1: json['addressLine1'] as String? ?? '',
+      city: json['city'] as String? ?? '',
+      postalCode: json['postalCode'] as String? ?? '',
+      formattedAddress: json['formattedAddress'] as String? ?? '',
+      countryCode: json['countryCode'] as String? ?? '',
+      resolutionHint: json['resolutionHint'] as String? ?? '',
+    );
+  }
+}
+
+class AddressPredictionResult {
+  const AddressPredictionResult({
+    required this.placeId,
+    required this.description,
+    required this.primaryText,
+    required this.secondaryText,
+  });
+
+  final String placeId;
+  final String description;
+  final String primaryText;
+  final String secondaryText;
+
+  factory AddressPredictionResult.fromJson(Map<String, dynamic> json) {
+    return AddressPredictionResult(
+      placeId: json['placeId'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      primaryText: json['primaryText'] as String? ?? '',
+      secondaryText: json['secondaryText'] as String? ?? '',
     );
   }
 }

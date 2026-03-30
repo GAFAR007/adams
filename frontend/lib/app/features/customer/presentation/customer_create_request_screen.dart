@@ -3,7 +3,9 @@
 /// HOW: Step through the required request fields, offer inline choices for service/date/time, then submit through the repository.
 library;
 
+import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,8 +13,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../config/app_config.dart';
 import '../../../core/models/service_request_model.dart';
+import '../../../core/network/api_client.dart';
 import '../../../theme/app_theme.dart';
 import '../../customer/data/customer_repository.dart';
+import '../../../shared/utils/request_attachment_picker.dart';
+import '../../../shared/utils/request_attachment_picker_types.dart';
 import 'customer_requests_screen.dart';
 
 class CustomerCreateRequestScreen extends ConsumerStatefulWidget {
@@ -117,18 +122,30 @@ class _CustomerCreateRequestScreenState
   final Random _random = Random();
   final List<_RequestConversationMessage> _messages =
       <_RequestConversationMessage>[];
+  final List<AddressPredictionResult> _addressPredictions =
+      <AddressPredictionResult>[];
+  final List<PickedRequestAttachmentFile> _pendingSitePhotos =
+      <PickedRequestAttachmentFile>[];
 
   String? _selectedServiceType;
   String? _hydratedRequestId;
   _RequestConversationStep? _stepOverride;
+  _VerifiedAddressSuggestion? _pendingVerifiedAddress;
+  Timer? _addressAutocompleteDebounce;
+  String _lastAddressAutocompleteQuery = '';
   bool _hasSeededConversation = false;
   bool _isSubmitting = false;
+  bool _isVerifyingAddress = false;
+  bool _isLoadingAddressPredictions = false;
+  bool _isUploadingSitePhotos = false;
+  int _addressVerificationFailureCount = 0;
 
   bool get _isEditing => widget.requestId != null;
 
   @override
   void initState() {
     super.initState();
+    _chatInputController.addListener(_handleChatInputChanged);
     final requestedService = widget.initialServiceType;
     _selectedServiceType =
         requestedService != null &&
@@ -139,12 +156,14 @@ class _CustomerCreateRequestScreenState
 
   @override
   void dispose() {
+    _addressAutocompleteDebounce?.cancel();
     _addressController.dispose();
     _cityController.dispose();
     _postalCodeController.dispose();
     _dateController.dispose();
     _timeWindowController.dispose();
     _messageController.dispose();
+    _chatInputController.removeListener(_handleChatInputChanged);
     _chatInputController.dispose();
     _chatScrollController.dispose();
     super.dispose();
@@ -161,6 +180,12 @@ class _CustomerCreateRequestScreenState
 
     if (_addressController.text.trim().isEmpty) {
       return _RequestConversationStep.address;
+    }
+
+    if (_pendingVerifiedAddress != null &&
+        _cityController.text.trim().isEmpty &&
+        _postalCodeController.text.trim().isEmpty) {
+      return _RequestConversationStep.addressConfirmation;
     }
 
     if (_cityController.text.trim().isEmpty) {
@@ -184,6 +209,95 @@ class _CustomerCreateRequestScreenState
     }
 
     return _RequestConversationStep.done;
+  }
+
+  bool get _canPredictAddress =>
+      _currentStep() == _RequestConversationStep.address &&
+      !_isVerifyingAddress &&
+      !_isSubmitting;
+
+  void _handleChatInputChanged() {
+    if (!_canPredictAddress) {
+      _clearAddressPredictions();
+      return;
+    }
+
+    final query = _chatInputController.text.trim();
+    if (query.length < 3) {
+      _clearAddressPredictions();
+      return;
+    }
+
+    _addressAutocompleteDebounce?.cancel();
+    _addressAutocompleteDebounce = Timer(
+      const Duration(milliseconds: 280),
+      () => _loadAddressPredictions(query),
+    );
+  }
+
+  void _clearAddressPredictions() {
+    _addressAutocompleteDebounce?.cancel();
+    _lastAddressAutocompleteQuery = '';
+    if (_addressPredictions.isEmpty && !_isLoadingAddressPredictions) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingAddressPredictions = false;
+      _addressPredictions.clear();
+    });
+  }
+
+  Future<void> _loadAddressPredictions(String query) async {
+    if (!_canPredictAddress) {
+      return;
+    }
+
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.length < 3) {
+      _clearAddressPredictions();
+      return;
+    }
+
+    _lastAddressAutocompleteQuery = normalizedQuery;
+    if (mounted) {
+      setState(() {
+        _isLoadingAddressPredictions = true;
+      });
+    }
+
+    try {
+      final predictions = await ref
+          .read(customerRepositoryProvider)
+          .autocompleteAddress(input: normalizedQuery);
+
+      if (!mounted ||
+          !_canPredictAddress ||
+          _chatInputController.text.trim() != normalizedQuery ||
+          _lastAddressAutocompleteQuery != normalizedQuery) {
+        return;
+      }
+
+      setState(() {
+        _addressPredictions
+          ..clear()
+          ..addAll(predictions);
+        _isLoadingAddressPredictions = false;
+      });
+    } catch (_) {
+      if (!mounted || _lastAddressAutocompleteQuery != normalizedQuery) {
+        return;
+      }
+
+      setState(() {
+        _addressPredictions.clear();
+        _isLoadingAddressPredictions = false;
+      });
+    }
   }
 
   void _seedConversationIfNeeded({ServiceRequestModel? request}) {
@@ -249,6 +363,14 @@ class _CustomerCreateRequestScreenState
     _timeWindowController.text = request.preferredTimeWindow;
     _messageController.text = request.message;
     _stepOverride = null;
+    _pendingVerifiedAddress = null;
+    _addressPredictions.clear();
+    _pendingSitePhotos.clear();
+    _lastAddressAutocompleteQuery = '';
+    _isVerifyingAddress = false;
+    _isLoadingAddressPredictions = false;
+    _isUploadingSitePhotos = false;
+    _addressVerificationFailureCount = 0;
     _hasSeededConversation = false;
     _messages.clear();
   }
@@ -293,6 +415,14 @@ class _CustomerCreateRequestScreenState
       _timeWindowController.text = seed.preferredTimeWindow;
       _messageController.text = seed.message;
       _stepOverride = null;
+      _pendingVerifiedAddress = null;
+      _addressPredictions.clear();
+      _pendingSitePhotos.clear();
+      _lastAddressAutocompleteQuery = '';
+      _isVerifyingAddress = false;
+      _isLoadingAddressPredictions = false;
+      _isUploadingSitePhotos = false;
+      _addressVerificationFailureCount = 0;
       _hasSeededConversation = true;
       _messages
         ..clear()
@@ -318,7 +448,14 @@ class _CustomerCreateRequestScreenState
   }
 
   void _captureCurrentStep(String rawValue, {String? displayValue}) {
-    if (_isSubmitting) {
+    _captureCurrentStepAsync(rawValue, displayValue: displayValue);
+  }
+
+  Future<void> _captureCurrentStepAsync(
+    String rawValue, {
+    String? displayValue,
+  }) async {
+    if (_isSubmitting || _isVerifyingAddress) {
       return;
     }
 
@@ -339,6 +476,16 @@ class _CustomerCreateRequestScreenState
       return;
     }
 
+    if (step == _RequestConversationStep.address) {
+      await _handleAddressStep(trimmedValue);
+      return;
+    }
+
+    if (step == _RequestConversationStep.addressConfirmation) {
+      await _handleAddressConfirmationStep(trimmedValue);
+      return;
+    }
+
     late final String userVisibleText;
     switch (step) {
       case _RequestConversationStep.service:
@@ -350,8 +497,8 @@ class _CustomerCreateRequestScreenState
         _selectedServiceType = matchedService;
         userVisibleText = AppConfig.serviceLabelFor(matchedService);
       case _RequestConversationStep.address:
-        _addressController.text = trimmedValue;
-        userVisibleText = trimmedValue;
+      case _RequestConversationStep.addressConfirmation:
+        return;
       case _RequestConversationStep.city:
         _cityController.text = trimmedValue;
         userVisibleText = trimmedValue;
@@ -391,6 +538,203 @@ class _CustomerCreateRequestScreenState
     _scrollToBottom();
   }
 
+  Future<void> _handleAddressStep(
+    String addressLine1, {
+    String? placeId,
+  }) async {
+    _chatInputController.clear();
+
+    setState(() {
+      _messages.add(_RequestConversationMessage.user(text: addressLine1));
+      _isVerifyingAddress = true;
+      _isLoadingAddressPredictions = false;
+      _pendingVerifiedAddress = null;
+      _stepOverride = null;
+      _addressPredictions.clear();
+      _cityController.clear();
+      _postalCodeController.clear();
+    });
+    _scrollToBottom();
+
+    try {
+      final verification = await ref
+          .read(customerRepositoryProvider)
+          .verifyAddress(addressLine1: addressLine1, placeId: placeId);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (verification.isVerified) {
+        final suggestion = _VerifiedAddressSuggestion.fromResult(verification);
+
+        setState(() {
+          _addressController.text = suggestion.addressLine1;
+          _pendingVerifiedAddress = suggestion;
+          _addressVerificationFailureCount = 0;
+          _stepOverride = _RequestConversationStep.addressConfirmation;
+          _addressPredictions.clear();
+          _messages.add(
+            _RequestConversationMessage.assistant(
+              text: _verifiedAddressPrompt(suggestion),
+            ),
+          );
+          _isVerifyingAddress = false;
+        });
+        _scrollToBottom();
+        return;
+      }
+
+      if (verification.isNotFound) {
+        final shouldFallbackToManual = _addressVerificationFailureCount >= 1;
+
+        setState(() {
+          _addressController.text = addressLine1;
+          _pendingVerifiedAddress = null;
+          _addressVerificationFailureCount += 1;
+          _stepOverride = shouldFallbackToManual
+              ? null
+              : _RequestConversationStep.address;
+          _addressPredictions.clear();
+          _messages.add(
+            _RequestConversationMessage.assistant(
+              text: shouldFallbackToManual
+                  ? _addressManualFallbackPrompt()
+                  : _addressRetypePrompt(),
+            ),
+          );
+          _isVerifyingAddress = false;
+        });
+        _scrollToBottom();
+        return;
+      }
+
+      setState(() {
+        _addressController.text = addressLine1;
+        _pendingVerifiedAddress = null;
+        _addressVerificationFailureCount = 0;
+        _stepOverride = null;
+        _addressPredictions.clear();
+        _messages.add(
+          _RequestConversationMessage.assistant(
+            text: _addressVerificationUnavailablePrompt(),
+          ),
+        );
+        _isVerifyingAddress = false;
+      });
+    } on ApiException {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _addressController.text = addressLine1;
+        _pendingVerifiedAddress = null;
+        _addressVerificationFailureCount = 0;
+        _stepOverride = null;
+        _addressPredictions.clear();
+        _messages.add(
+          _RequestConversationMessage.assistant(
+            text: _addressVerificationUnavailablePrompt(),
+          ),
+        );
+        _isVerifyingAddress = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _addressController.text = addressLine1;
+        _pendingVerifiedAddress = null;
+        _addressVerificationFailureCount = 0;
+        _stepOverride = null;
+        _messages.add(
+          _RequestConversationMessage.assistant(
+            text: _addressVerificationUnavailablePrompt(),
+          ),
+        );
+        _isVerifyingAddress = false;
+      });
+    }
+
+    _scrollToBottom();
+  }
+
+  Future<void> _handleAddressConfirmationStep(String rawValue) async {
+    if (_looksLikeAddressConfirmation(rawValue)) {
+      _confirmVerifiedAddress();
+      return;
+    }
+
+    await _handleAddressStep(rawValue);
+  }
+
+  Future<void> _selectAddressPrediction(
+    AddressPredictionResult prediction,
+  ) async {
+    _chatInputController.text = prediction.description;
+    await _handleAddressStep(
+      prediction.description,
+      placeId: prediction.placeId,
+    );
+  }
+
+  void _confirmVerifiedAddress() {
+    final suggestion = _pendingVerifiedAddress;
+    if (suggestion == null) {
+      _pushAssistantMessage(_addressRetypePrompt());
+      return;
+    }
+
+    final nextStep = _RequestConversationStep.preferredDate;
+
+    setState(() {
+      _cityController.text = suggestion.city;
+      _postalCodeController.text = suggestion.postalCode;
+      _addressController.text = suggestion.addressLine1;
+      _pendingVerifiedAddress = null;
+      _addressVerificationFailureCount = 0;
+      _stepOverride = null;
+      _addressPredictions.clear();
+      _messages.add(
+        _RequestConversationMessage.user(
+          text: 'Use ${suggestion.city}, ${suggestion.postalCode}',
+        ),
+      );
+      _messages.add(
+        _RequestConversationMessage.assistant(
+          text: _assistantFollowUp(
+            _RequestConversationStep.addressConfirmation,
+            nextStep,
+          ),
+        ),
+      );
+    });
+    _scrollToBottom();
+  }
+
+  void _promptRetypedAddress() {
+    if (_isSubmitting || _isVerifyingAddress) {
+      return;
+    }
+
+    setState(() {
+      _pendingVerifiedAddress = null;
+      _addressVerificationFailureCount += 1;
+      _stepOverride = _RequestConversationStep.address;
+      _addressPredictions.clear();
+      _messages.add(
+        _RequestConversationMessage.assistant(
+          text:
+              'No problem. Type the address again with the street and number, and I will check the city and postal code once more.',
+        ),
+      );
+    });
+    _scrollToBottom();
+  }
+
   String? _validateInput(_RequestConversationStep step, String value) {
     switch (step) {
       case _RequestConversationStep.service:
@@ -399,6 +743,8 @@ class _CustomerCreateRequestScreenState
         return value.length < 5
             ? 'Please enter a fuller address so staff know where to attend.'
             : null;
+      case _RequestConversationStep.addressConfirmation:
+        return null;
       case _RequestConversationStep.city:
         return value.length < 2 ? 'Please enter the city.' : null;
       case _RequestConversationStep.postalCode:
@@ -491,6 +837,8 @@ class _CustomerCreateRequestScreenState
       _RequestConversationStep.service =>
         'Got it, ${_selectedServiceLabel ?? 'that service'} is noted. What address should the team attend?',
       _RequestConversationStep.address => 'Thanks. Which city is that in?',
+      _RequestConversationStep.addressConfirmation =>
+        'Perfect. I will use ${_cityController.text.trim()} ${_postalCodeController.text.trim()} for that location. What date would you prefer? You can pick one below or open the calendar.',
       _RequestConversationStep.city =>
         'Great. What postal code should I attach to this location?',
       _RequestConversationStep.postalCode =>
@@ -498,7 +846,7 @@ class _CustomerCreateRequestScreenState
       _RequestConversationStep.preferredDate =>
         'Nice. What time window works best for access?',
       _RequestConversationStep.preferredTimeWindow =>
-        'Understood. Finally, describe the work so the team knows what to prepare.',
+        'Understood. Finally, describe the work so the team knows what to prepare. If it helps, add up to 5 site photos below.',
       _RequestConversationStep.message =>
         'Everything is captured. Review the request summary below before sending.',
       _RequestConversationStep.done => _stepPrompt(nextStep),
@@ -509,7 +857,9 @@ class _CustomerCreateRequestScreenState
     return switch (step) {
       _RequestConversationStep.service => 'Which service do you need?',
       _RequestConversationStep.address =>
-        'What address should the team attend?',
+        'What Germany address should the team attend?',
+      _RequestConversationStep.addressConfirmation =>
+        'Type confirm to use the detected city and postal code, or enter a different address.',
       _RequestConversationStep.city => 'Which city is the job in?',
       _RequestConversationStep.postalCode =>
         'What postal code should I attach?',
@@ -525,6 +875,10 @@ class _CustomerCreateRequestScreenState
 
   void _startEditingStep(_RequestConversationStep step) {
     setState(() {
+      if (step == _RequestConversationStep.address) {
+        _pendingVerifiedAddress = null;
+        _addressVerificationFailureCount = 0;
+      }
       _stepOverride = step;
       _messages.add(
         _RequestConversationMessage.assistant(text: _editingPrompt(step)),
@@ -534,6 +888,7 @@ class _CustomerCreateRequestScreenState
     _chatInputController.text = switch (step) {
       _RequestConversationStep.service => '',
       _RequestConversationStep.address => _addressController.text.trim(),
+      _RequestConversationStep.addressConfirmation => '',
       _RequestConversationStep.city => _cityController.text.trim(),
       _RequestConversationStep.postalCode => _postalCodeController.text.trim(),
       _RequestConversationStep.preferredDate => '',
@@ -551,13 +906,16 @@ class _CustomerCreateRequestScreenState
       _RequestConversationStep.service =>
         'No problem. Choose the updated service below or type it in.',
       _RequestConversationStep.address => 'What is the updated address?',
+      _RequestConversationStep.addressConfirmation =>
+        'Type confirm to keep the detected city and postal code, or type a different address.',
       _RequestConversationStep.city => 'Which city should I use instead?',
       _RequestConversationStep.postalCode => 'What is the updated postal code?',
       _RequestConversationStep.preferredDate =>
         'Choose the updated preferred date below or open the calendar.',
       _RequestConversationStep.preferredTimeWindow =>
         'What time window should I use instead?',
-      _RequestConversationStep.message => 'Share the updated job description.',
+      _RequestConversationStep.message =>
+        'Share the updated job description and add up to 5 site photos if they help.',
       _RequestConversationStep.done =>
         'Review the summary and save when you are ready.',
     };
@@ -567,6 +925,8 @@ class _CustomerCreateRequestScreenState
     return switch (step) {
       _RequestConversationStep.service => 'Please choose a service first.',
       _RequestConversationStep.address => 'Please enter the service address.',
+      _RequestConversationStep.addressConfirmation =>
+        'Type confirm to use the detected city and postal code, or enter a different address.',
       _RequestConversationStep.city => 'Please enter the city.',
       _RequestConversationStep.postalCode => 'Please enter the postal code.',
       _RequestConversationStep.preferredDate => 'Please choose a date.',
@@ -586,11 +946,143 @@ class _CustomerCreateRequestScreenState
     return 'Use one of the date shortcuts, open the calendar, or type a date like 2026-04-02.';
   }
 
+  bool _looksLikeAddressConfirmation(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized == 'confirm' ||
+        normalized == 'confirmed' ||
+        normalized == 'yes' ||
+        normalized == 'y' ||
+        normalized == 'ok' ||
+        normalized == 'okay' ||
+        normalized == 'use it' ||
+        normalized == 'use this' ||
+        normalized == 'correct' ||
+        normalized == 'ja' ||
+        normalized == 'stimmt' ||
+        normalized == 'bestaetigen' ||
+        normalized == 'bestatigen';
+  }
+
+  String _verifiedAddressPrompt(_VerifiedAddressSuggestion suggestion) {
+    return 'I found ${suggestion.addressLine1} in ${suggestion.city}, ${suggestion.postalCode}. Type confirm to use that city and postal code, or type the full address again if it needs correcting.';
+  }
+
+  String _addressRetypePrompt() {
+    return 'I could not clearly confirm the city and postal code from that address. Please type the full street address again, including the building number.';
+  }
+
+  String _addressManualFallbackPrompt() {
+    return 'I still could not verify that address automatically, so I will continue manually. Which city is the job in?';
+  }
+
+  String _addressVerificationUnavailablePrompt() {
+    return 'I could not verify that address right now, so I will continue manually. Which city is the job in?';
+  }
+
   void _pushAssistantMessage(String text) {
     setState(() {
       _messages.add(_RequestConversationMessage.assistant(text: text));
     });
     _scrollToBottom();
+  }
+
+  Future<void> _pickSitePhotos() async {
+    if (_isSubmitting || _isUploadingSitePhotos) {
+      return;
+    }
+
+    final remainingSlots = 5 - _pendingSitePhotos.length;
+    if (remainingSlots <= 0) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('You can add up to 5 site photos at a time.'),
+          ),
+        );
+      return;
+    }
+
+    try {
+      final pickedFiles = await pickRequestAttachmentFiles(
+        maxFiles: remainingSlots,
+        imagesOnly: true,
+      );
+
+      if (!mounted || pickedFiles.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _pendingSitePhotos.addAll(pickedFiles.take(remainingSlots));
+      });
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              '${pickedFiles.take(remainingSlots).length} site ${pickedFiles.length == 1 ? 'photo' : 'photos'} added',
+            ),
+          ),
+        );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Exception: ', '')),
+          ),
+        );
+    }
+  }
+
+  void _removeSitePhoto(PickedRequestAttachmentFile file) {
+    setState(() {
+      _pendingSitePhotos.remove(file);
+    });
+  }
+
+  Future<int> _uploadPendingSitePhotos(
+    CustomerRepository repository,
+    String requestId,
+  ) async {
+    if (_pendingSitePhotos.isEmpty) {
+      return 0;
+    }
+
+    setState(() {
+      _isUploadingSitePhotos = true;
+    });
+
+    var uploadedCount = 0;
+
+    try {
+      for (var index = 0; index < _pendingSitePhotos.length; index += 1) {
+        final file = _pendingSitePhotos[index];
+        await repository.uploadRequestAttachment(
+          requestId: requestId,
+          bytes: file.bytes,
+          fileName: file.name,
+          mimeType: file.mimeType,
+          caption:
+              'Site photo ${index + 1} of ${_pendingSitePhotos.length} from request intake',
+        );
+        uploadedCount += 1;
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingSitePhotos = false;
+        });
+      }
+    }
+
+    return uploadedCount;
   }
 
   Future<void> _submitRequest() async {
@@ -608,6 +1100,8 @@ class _CustomerCreateRequestScreenState
         'message': _messageController.text.trim(),
       };
 
+      String requestId = widget.requestId ?? '';
+
       if (_isEditing) {
         await repository.updateRequest(
           requestId: widget.requestId!,
@@ -620,7 +1114,7 @@ class _CustomerCreateRequestScreenState
           message: payload['message']!,
         );
       } else {
-        await repository.createRequest(
+        final createdRequest = await repository.createRequest(
           serviceType: payload['serviceType']!,
           addressLine1: payload['addressLine1']!,
           city: payload['city']!,
@@ -629,6 +1123,20 @@ class _CustomerCreateRequestScreenState
           preferredTimeWindow: payload['preferredTimeWindow']!,
           message: payload['message']!,
         );
+        requestId = createdRequest.id;
+      }
+
+      var uploadedPhotoCount = 0;
+      var photoUploadFailed = false;
+      if (requestId.isNotEmpty && _pendingSitePhotos.isNotEmpty) {
+        try {
+          uploadedPhotoCount = await _uploadPendingSitePhotos(
+            repository,
+            requestId,
+          );
+        } catch (_) {
+          photoUploadFailed = true;
+        }
       }
 
       ref.invalidate(customerRequestsProvider);
@@ -640,7 +1148,15 @@ class _CustomerCreateRequestScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _isEditing
+            photoUploadFailed
+                ? (_isEditing
+                      ? 'Request updated, but some site photos failed to upload'
+                      : 'Request submitted, but some site photos failed to upload')
+                : uploadedPhotoCount > 0
+                ? (_isEditing
+                      ? 'Request updated with $uploadedPhotoCount site photos'
+                      : 'Request submitted with $uploadedPhotoCount site photos')
+                : _isEditing
                 ? 'Request updated successfully'
                 : 'Request submitted successfully',
           ),
@@ -659,7 +1175,12 @@ class _CustomerCreateRequestScreenState
       );
     } finally {
       if (mounted) {
-        setState(() => _isSubmitting = false);
+        setState(() {
+          _isSubmitting = false;
+          if (!_isEditing) {
+            _pendingSitePhotos.clear();
+          }
+        });
       }
     }
   }
@@ -728,6 +1249,9 @@ class _CustomerCreateRequestScreenState
     final panelTitle = _isEditing ? 'Update with AI' : 'Request with AI';
     final currentStep = _currentStep();
     final showComposer = currentStep != _RequestConversationStep.done;
+    final showAddressPredictions =
+        currentStep == _RequestConversationStep.address &&
+        (_isLoadingAddressPredictions || _addressPredictions.isNotEmpty);
     final wide = MediaQuery.sizeOf(context).width >= 1080;
     final fullBleedChat = !wide;
     final chatSurfaceColor = Color.lerp(AppTheme.ink, AppTheme.cobalt, 0.2)!;
@@ -904,6 +1428,20 @@ class _CustomerCreateRequestScreenState
           ),
           if (showComposer) ...<Widget>[
             _buildStepActions(context, currentStep),
+            if (showAddressPredictions)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  fullBleedChat ? 16 : 20,
+                  12,
+                  fullBleedChat ? 16 : 20,
+                  0,
+                ),
+                child: _AddressPredictionsCard(
+                  isLoading: _isLoadingAddressPredictions,
+                  predictions: _addressPredictions,
+                  onSelect: _selectAddressPrediction,
+                ),
+              ),
             Padding(
               padding: EdgeInsets.fromLTRB(
                 fullBleedChat ? 16 : 20,
@@ -921,10 +1459,15 @@ class _CustomerCreateRequestScreenState
                       ),
                       child: TextField(
                         controller: _chatInputController,
-                        enabled: !_isSubmitting,
+                        enabled: !_isSubmitting && !_isVerifyingAddress,
                         textInputAction: TextInputAction.send,
                         keyboardType:
                             currentStep == _RequestConversationStep.postalCode
+                            ? TextInputType.number
+                            : currentStep == _RequestConversationStep.address ||
+                                  currentStep ==
+                                      _RequestConversationStep
+                                          .addressConfirmation
                             ? TextInputType.streetAddress
                             : TextInputType.text,
                         minLines:
@@ -963,17 +1506,17 @@ class _CustomerCreateRequestScreenState
                     width: 54,
                     height: 54,
                     decoration: BoxDecoration(
-                      color: _isSubmitting
+                      color: (_isSubmitting || _isVerifyingAddress)
                           ? AppTheme.cobalt.withValues(alpha: 0.45)
                           : AppTheme.cobalt,
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: IconButton(
-                      onPressed: _isSubmitting
+                      onPressed: (_isSubmitting || _isVerifyingAddress)
                           ? null
                           : () =>
                                 _captureCurrentStep(_chatInputController.text),
-                      icon: _isSubmitting
+                      icon: (_isSubmitting || _isVerifyingAddress)
                           ? const SizedBox(
                               width: 18,
                               height: 18,
@@ -1064,6 +1607,15 @@ class _CustomerCreateRequestScreenState
                     onEdit: () =>
                         _startEditingStep(_RequestConversationStep.message),
                   ),
+                  if (_pendingSitePhotos.isNotEmpty)
+                    _RequestSummaryRowData(
+                      label: 'Site photos',
+                      value:
+                          '${_pendingSitePhotos.length} photo${_pendingSitePhotos.length == 1 ? '' : 's'} ready to upload with this request',
+                      icon: Icons.photo_library_rounded,
+                      onEdit: () =>
+                          _startEditingStep(_RequestConversationStep.message),
+                    ),
                 ],
               ),
             ),
@@ -1189,6 +1741,39 @@ class _CustomerCreateRequestScreenState
       );
     }
 
+    if (currentStep == _RequestConversationStep.addressConfirmation) {
+      final suggestion = _pendingVerifiedAddress;
+      final confirmLabel = suggestion == null
+          ? 'Use detected address'
+          : 'Use ${suggestion.city} · ${suggestion.postalCode}';
+
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              _ConversationChoiceChip(
+                label: confirmLabel,
+                onTap: _confirmVerifiedAddress,
+              ),
+              OutlinedButton.icon(
+                onPressed: _promptRetypedAddress,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+                ),
+                icon: const Icon(Icons.edit_location_alt_rounded, size: 18),
+                label: const Text('Retype address'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (currentStep == _RequestConversationStep.preferredDate) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
@@ -1243,20 +1828,101 @@ class _CustomerCreateRequestScreenState
       );
     }
 
+    if (currentStep == _RequestConversationStep.message) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: (_isSubmitting || _isUploadingSitePhotos)
+                      ? null
+                      : _pickSitePhotos,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.16),
+                    ),
+                  ),
+                  icon: _isUploadingSitePhotos
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.photo_camera_back_rounded, size: 18),
+                  label: Text(
+                    _pendingSitePhotos.isEmpty
+                        ? 'Add site photos (max 5)'
+                        : 'Add more photos (${_pendingSitePhotos.length}/5)',
+                  ),
+                ),
+                if (_pendingSitePhotos.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${_pendingSitePhotos.length} photo${_pendingSitePhotos.length == 1 ? '' : 's'} selected',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (_pendingSitePhotos.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 108,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _pendingSitePhotos.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final photo = _pendingSitePhotos[index];
+                    return _PendingSitePhotoCard(
+                      file: photo,
+                      onRemove: () => _removeSitePhoto(photo),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return const SizedBox.shrink();
   }
 
   String _placeholderForStep(_RequestConversationStep step) {
     return switch (step) {
       _RequestConversationStep.service => 'Type or choose a service',
-      _RequestConversationStep.address => 'Street and number',
+      _RequestConversationStep.address => 'Street and number in Germany',
+      _RequestConversationStep.addressConfirmation =>
+        'Type confirm or enter a different address',
       _RequestConversationStep.city => 'City',
       _RequestConversationStep.postalCode => 'Postal code',
       _RequestConversationStep.preferredDate =>
         'Choose a date below or type 2026-04-02',
       _RequestConversationStep.preferredTimeWindow => 'Preferred access window',
       _RequestConversationStep.message =>
-        'Describe the work that needs attention',
+        'Describe the work that needs attention and add photos if helpful',
       _RequestConversationStep.done => 'Ready to submit',
     };
   }
@@ -1265,6 +1931,8 @@ class _CustomerCreateRequestScreenState
     return switch (step) {
       _RequestConversationStep.service => 'Choosing service',
       _RequestConversationStep.address => 'Collecting address',
+      _RequestConversationStep.addressConfirmation =>
+        'Confirming detected city and post code',
       _RequestConversationStep.city => 'Collecting city',
       _RequestConversationStep.postalCode => 'Collecting postal code',
       _RequestConversationStep.preferredDate => 'Choosing preferred date',
@@ -1289,7 +1957,9 @@ class _CustomerCreateRequestScreenState
       ),
       _ProgressChipData(
         label: 'Address',
-        isActive: current == _RequestConversationStep.address,
+        isActive:
+            current == _RequestConversationStep.address ||
+            current == _RequestConversationStep.addressConfirmation,
         isComplete: _addressController.text.trim().isNotEmpty,
       ),
       _ProgressChipData(
@@ -1419,7 +2089,17 @@ class _RequestInfoPanel extends StatelessWidget {
           const SizedBox(height: 12),
           _InfoBullet(
             text:
+                'Addresses are checked live first, so confirmed city and postal code can drop in automatically.',
+          ),
+          const SizedBox(height: 12),
+          _InfoBullet(
+            text:
                 'When the date step appears, quick picks and the calendar stay directly in the flow.',
+          ),
+          const SizedBox(height: 12),
+          _InfoBullet(
+            text:
+                'At the details step, customers can add up to 5 site photos to help the team prepare.',
           ),
           const SizedBox(height: 12),
           _InfoBullet(
@@ -1777,6 +2457,222 @@ class _ConversationChoiceChip extends StatelessWidget {
   }
 }
 
+class _AddressPredictionsCard extends StatelessWidget {
+  const _AddressPredictionsCard({
+    required this.isLoading,
+    required this.predictions,
+    required this.onSelect,
+  });
+
+  final bool isLoading;
+  final List<AddressPredictionResult> predictions;
+  final Future<void> Function(AddressPredictionResult prediction) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: AppTheme.ink.withValues(alpha: 0.18),
+            blurRadius: 16,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Address suggestions in Germany',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: AppTheme.ink,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: LinearProgressIndicator(minHeight: 3),
+              ),
+            ...predictions.map(
+              (prediction) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _AddressPredictionTile(
+                  prediction: prediction,
+                  onTap: () {
+                    onSelect(prediction);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AddressPredictionTile extends StatelessWidget {
+  const _AddressPredictionTile({required this.prediction, required this.onTap});
+
+  final AddressPredictionResult prediction;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F7FC),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFD8E2F1)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppTheme.cobalt.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.location_on_rounded,
+                  color: AppTheme.cobalt,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      prediction.primaryText.isEmpty
+                          ? prediction.description
+                          : prediction.primaryText,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (prediction.secondaryText.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Text(
+                        prediction.secondaryText,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF657287),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingSitePhotoCard extends StatelessWidget {
+  const _PendingSitePhotoCard({required this.file, required this.onRemove});
+
+  final PickedRequestAttachmentFile file;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 134,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.memory(
+                Uint8List.fromList(file.bytes),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: LinearGradient(
+                  colors: <Color>[
+                    Colors.transparent,
+                    AppTheme.ink.withValues(alpha: 0.75),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.35),
+              shape: const CircleBorder(),
+              child: IconButton(
+                onPressed: onRemove,
+                icon: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                tooltip: 'Remove photo',
+                constraints: const BoxConstraints.tightFor(
+                  width: 30,
+                  height: 30,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 10,
+            right: 10,
+            bottom: 10,
+            child: Text(
+              file.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AmbientGlow extends StatelessWidget {
   const _AmbientGlow({required this.diameter, required this.color});
 
@@ -1823,9 +2719,35 @@ class _RequestDraftSeed {
   final String message;
 }
 
+class _VerifiedAddressSuggestion {
+  const _VerifiedAddressSuggestion({
+    required this.addressLine1,
+    required this.city,
+    required this.postalCode,
+    required this.formattedAddress,
+  });
+
+  final String addressLine1;
+  final String city;
+  final String postalCode;
+  final String formattedAddress;
+
+  factory _VerifiedAddressSuggestion.fromResult(
+    AddressVerificationResult result,
+  ) {
+    return _VerifiedAddressSuggestion(
+      addressLine1: result.addressLine1,
+      city: result.city,
+      postalCode: result.postalCode,
+      formattedAddress: result.formattedAddress,
+    );
+  }
+}
+
 enum _RequestConversationStep {
   service,
   address,
+  addressConfirmation,
   city,
   postalCode,
   preferredDate,

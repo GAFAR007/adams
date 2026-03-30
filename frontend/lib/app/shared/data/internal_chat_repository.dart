@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/internal_chat_model.dart';
 import '../../core/network/api_client.dart';
+import '../../core/realtime/realtime_service.dart';
 
 final internalChatRepositoryProvider = Provider<InternalChatRepository>((ref) {
   return InternalChatRepository(ref.read(apiClientProvider));
@@ -17,16 +18,20 @@ final internalChatRepositoryProvider = Provider<InternalChatRepository>((ref) {
 final internalChatUnreadCountProvider = StreamProvider.autoDispose
     .family<int, String>((ref, viewerRole) async* {
       final repository = ref.watch(internalChatRepositoryProvider);
-      var isDisposed = false;
-      ref.onDispose(() {
-        isDisposed = true;
-      });
+      final events = ref.watch(realtimeServiceProvider).events;
 
-      while (!isDisposed) {
+      final initialBundle = await repository.fetchBundle(
+        viewerRole: viewerRole,
+      );
+      yield initialBundle.totalUnreadCount;
+
+      await for (final event in events) {
+        if (!event.affectsInternalChats) {
+          continue;
+        }
+
         final bundle = await repository.fetchBundle(viewerRole: viewerRole);
         yield bundle.totalUnreadCount;
-
-        await Future<void>.delayed(const Duration(seconds: 8));
       }
     });
 

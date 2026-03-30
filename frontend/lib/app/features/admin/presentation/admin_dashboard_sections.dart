@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
+import '../../../shared/presentation/request_message_composer.dart';
 import '../../../shared/presentation/request_thread_section.dart';
 import '../../../shared/presentation/status_chip.dart';
 import '../../../theme/app_theme.dart';
@@ -441,6 +442,13 @@ class AdminRequestDetailPane extends StatelessWidget {
     required this.onRejectPaymentProof,
     required this.isSendingInvoice,
     required this.isReviewingPaymentProof,
+    required this.messageController,
+    required this.isSendingMessage,
+    required this.isUploadingAttachment,
+    required this.composerEnabled,
+    required this.onSendMessage,
+    required this.onUploadAttachment,
+    required this.threadScrollController,
     this.onBack,
   });
 
@@ -459,6 +467,13 @@ class AdminRequestDetailPane extends StatelessWidget {
   final VoidCallback? onRejectPaymentProof;
   final bool isSendingInvoice;
   final bool isReviewingPaymentProof;
+  final TextEditingController? messageController;
+  final bool isSendingMessage;
+  final bool isUploadingAttachment;
+  final bool composerEnabled;
+  final VoidCallback? onSendMessage;
+  final VoidCallback? onUploadAttachment;
+  final ScrollController threadScrollController;
   final VoidCallback? onBack;
 
   Future<void> _showAssignmentSheet(
@@ -926,14 +941,47 @@ class AdminRequestDetailPane extends StatelessWidget {
                 ),
               ),
               child: SingleChildScrollView(
+                controller: threadScrollController,
                 padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
                 child: RequestThreadSection(
+                  key: ValueKey<String>(request!.id),
                   messages: request!.messages,
                   viewerRole: 'admin',
                   dark: true,
                   emptyLabel: 'No thread messages yet.',
                 ),
               ),
+            ),
+          ),
+          Divider(color: Colors.white.withValues(alpha: 0.06), height: 1),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              isCompact ? 14 : 18,
+              0,
+              isCompact ? 14 : 18,
+              isCompact ? 14 : 18,
+            ),
+            child: RequestMessageComposer(
+              controller: messageController ?? TextEditingController(),
+              leadingActions: <Widget>[
+                _AdminComposerActionButton(
+                  tooltip: 'Upload file',
+                  icon: isUploadingAttachment
+                      ? Icons.more_horiz_rounded
+                      : Icons.attach_file_rounded,
+                  onPressed: !composerEnabled || isUploadingAttachment
+                      ? null
+                      : onUploadAttachment,
+                ),
+              ],
+              hintText: composerEnabled
+                  ? 'Reply to the customer here'
+                  : 'Closed requests cannot accept new replies',
+              buttonLabel: 'Send reply',
+              isSubmitting: isSendingMessage,
+              isEnabled: composerEnabled,
+              onSubmit: onSendMessage ?? () {},
+              dark: true,
             ),
           ),
         ],
@@ -965,6 +1013,37 @@ class AdminRequestDetailPane extends StatelessWidget {
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');
     return '$day/$month/$year $hour:$minute';
+  }
+}
+
+class _AdminComposerActionButton extends StatelessWidget {
+  const _AdminComposerActionButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: onPressed == null ? 0.05 : 0.08),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(
+          icon,
+          color: Colors.white.withValues(alpha: onPressed == null ? 0.38 : 0.9),
+        ),
+      ),
+    );
   }
 }
 

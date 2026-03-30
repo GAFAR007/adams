@@ -9,7 +9,7 @@ import 'package:frontend/app/theme/app_theme.dart';
 
 import '../utils/external_url_opener.dart';
 
-class RequestThreadSection extends StatelessWidget {
+class RequestThreadSection extends StatefulWidget {
   const RequestThreadSection({
     super.key,
     required this.messages,
@@ -26,18 +26,25 @@ class RequestThreadSection extends StatelessWidget {
   final Widget? Function(RequestMessageModel message)? messageActionBuilder;
 
   @override
+  State<RequestThreadSection> createState() => _RequestThreadSectionState();
+}
+
+class _RequestThreadSectionState extends State<RequestThreadSection> {
+  bool _isAttachmentGalleryVisible = true;
+
+  @override
   Widget build(BuildContext context) {
-    if (messages.isEmpty) {
+    if (widget.messages.isEmpty) {
       return Align(
         alignment: Alignment.center,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: dark
+            color: widget.dark
                 ? Colors.white.withValues(alpha: 0.08)
                 : Colors.white.withValues(alpha: 0.78),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: dark
+              color: widget.dark
                   ? Colors.white.withValues(alpha: 0.1)
                   : AppTheme.clay.withValues(alpha: 0.28),
             ),
@@ -45,9 +52,11 @@ class RequestThreadSection extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Text(
-              emptyLabel,
+              widget.emptyLabel,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: dark ? Colors.white.withValues(alpha: 0.76) : null,
+                color: widget.dark
+                    ? Colors.white.withValues(alpha: 0.76)
+                    : null,
               ),
               textAlign: TextAlign.center,
             ),
@@ -56,21 +65,66 @@ class RequestThreadSection extends StatelessWidget {
       );
     }
 
+    final attachmentEntries = widget.messages
+        .where((RequestMessageModel message) => message.attachment != null)
+        .map(
+          (RequestMessageModel message) => _ThreadAttachmentEntry(
+            message: message,
+            attachment: message.attachment!,
+          ),
+        )
+        .toList(growable: false);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: messages.map((RequestMessageModel message) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _RequestMessageBubble(
-            message: message,
-            viewerRole: viewerRole,
-            dark: dark,
-            messageActionBuilder: messageActionBuilder,
-          ),
-        );
-      }).toList(),
+      children: <Widget>[
+        ...widget.messages.map((RequestMessageModel message) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _RequestMessageBubble(
+              message: message,
+              viewerRole: widget.viewerRole,
+              dark: widget.dark,
+              messageActionBuilder: widget.messageActionBuilder,
+            ),
+          );
+        }),
+        if (attachmentEntries.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          if (_isAttachmentGalleryVisible)
+            _RequestAttachmentGallery(
+              entries: attachmentEntries,
+              dark: widget.dark,
+              onDismiss: () {
+                setState(() {
+                  _isAttachmentGalleryVisible = false;
+                });
+              },
+            )
+          else
+            _RequestAttachmentGalleryToggle(
+              attachmentCount: attachmentEntries.length,
+              dark: widget.dark,
+              onPressed: () {
+                setState(() {
+                  _isAttachmentGalleryVisible = true;
+                });
+              },
+            ),
+        ],
+      ],
     );
   }
+}
+
+class _ThreadAttachmentEntry {
+  const _ThreadAttachmentEntry({
+    required this.message,
+    required this.attachment,
+  });
+
+  final RequestMessageModel message;
+  final RequestMessageAttachmentModel attachment;
 }
 
 class _RequestMessageBubble extends StatelessWidget {
@@ -403,6 +457,410 @@ class _RequestAttachmentTile extends StatelessWidget {
   }
 }
 
+class _RequestAttachmentGallery extends StatelessWidget {
+  const _RequestAttachmentGallery({
+    required this.entries,
+    required this.dark,
+    required this.onDismiss,
+  });
+
+  final List<_ThreadAttachmentEntry> entries;
+  final bool dark;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleColor = dark ? Colors.white : AppTheme.ink;
+    final subtitleColor = dark
+        ? Colors.white.withValues(alpha: 0.68)
+        : AppTheme.ink.withValues(alpha: 0.62);
+    final cardColor = dark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.white.withValues(alpha: 0.88);
+    final borderColor = dark
+        ? Colors.white.withValues(alpha: 0.08)
+        : AppTheme.clay.withValues(alpha: 0.26);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: borderColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.perm_media_rounded, size: 18, color: titleColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Files in chat',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: titleColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : AppTheme.cobalt.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      '${entries.length}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: dark ? Colors.white : AppTheme.cobalt,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: onDismiss,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 18,
+                        color: subtitleColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Every file shared in this request thread stays available here.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: subtitleColor,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 148,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: entries.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                itemBuilder: (BuildContext context, int index) {
+                  final entry = entries[index];
+                  return _RequestAttachmentGalleryCard(
+                    entry: entry,
+                    dark: dark,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestAttachmentGalleryToggle extends StatelessWidget {
+  const _RequestAttachmentGalleryToggle({
+    required this.attachmentCount,
+    required this.dark,
+    required this.onPressed,
+  });
+
+  final int attachmentCount;
+  final bool dark;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: dark ? Colors.white : AppTheme.cobalt,
+          backgroundColor: dark
+              ? Colors.white.withValues(alpha: 0.08)
+              : AppTheme.cobalt.withValues(alpha: 0.08),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+            side: BorderSide(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : AppTheme.cobalt.withValues(alpha: 0.18),
+            ),
+          ),
+        ),
+        icon: const Icon(Icons.perm_media_rounded, size: 16),
+        label: Text(
+          'Show files ($attachmentCount)',
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: dark ? Colors.white : AppTheme.cobalt,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestAttachmentGalleryCard extends StatelessWidget {
+  const _RequestAttachmentGalleryCard({
+    required this.entry,
+    required this.dark,
+  });
+
+  final _ThreadAttachmentEntry entry;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final attachment = entry.attachment;
+    final fileUrl = attachment.fileUrl;
+    final senderName = entry.message.senderName.trim().isNotEmpty
+        ? entry.message.senderName.trim()
+        : entry.message.isCustomer
+        ? 'Customer'
+        : entry.message.isStaff
+        ? 'Staff'
+        : entry.message.isAdmin
+        ? 'Admin'
+        : 'Attachment';
+    final accentColor = _incomingAccentFor(entry.message);
+    final baseColor = dark ? const Color(0xFF121417) : Colors.white;
+    final footerColor = dark
+        ? Colors.white.withValues(alpha: 0.68)
+        : AppTheme.ink.withValues(alpha: 0.66);
+
+    Future<void> handleOpen() async {
+      if (fileUrl == null) {
+        return;
+      }
+
+      final opened = await openExternalUrl(fileUrl);
+      if (!context.mounted || opened) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Opening attachments is not supported here'),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: 164,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: fileUrl == null ? null : handleOpen,
+          child: Ink(
+            decoration: BoxDecoration(
+              color: baseColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : AppTheme.clay.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(18),
+                    ),
+                    child: _RequestAttachmentGalleryPreview(
+                      attachment: attachment,
+                      accentColor: accentColor,
+                      dark: dark,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        attachment.originalName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: dark ? Colors.white : AppTheme.ink,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$senderName · ${_formatTimestamp(entry.message.createdAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: footerColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestAttachmentGalleryPreview extends StatelessWidget {
+  const _RequestAttachmentGalleryPreview({
+    required this.attachment,
+    required this.accentColor,
+    required this.dark,
+  });
+
+  final RequestMessageAttachmentModel attachment;
+  final Color accentColor;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final fileUrl = attachment.fileUrl;
+    if (_isImageAttachment(attachment.mimeType) && fileUrl != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Image.network(
+            fileUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _AttachmentPreviewFallback(
+              attachment: attachment,
+              accentColor: accentColor,
+              dark: dark,
+            ),
+            loadingBuilder:
+                (
+                  BuildContext context,
+                  Widget child,
+                  ImageChunkEvent? loadingProgress,
+                ) {
+                  if (loadingProgress == null) {
+                    return child;
+                  }
+
+                  return _AttachmentPreviewFallback(
+                    attachment: attachment,
+                    accentColor: accentColor,
+                    dark: dark,
+                  );
+                },
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.28),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _AttachmentPreviewFallback(
+      attachment: attachment,
+      accentColor: accentColor,
+      dark: dark,
+    );
+  }
+}
+
+class _AttachmentPreviewFallback extends StatelessWidget {
+  const _AttachmentPreviewFallback({
+    required this.attachment,
+    required this.accentColor,
+    required this.dark,
+  });
+
+  final RequestMessageAttachmentModel attachment;
+  final Color accentColor;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: dark
+              ? <Color>[
+                  accentColor.withValues(alpha: 0.18),
+                  Colors.black.withValues(alpha: 0.12),
+                ]
+              : <Color>[accentColor.withValues(alpha: 0.14), Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              _attachmentIconFor(attachment.mimeType),
+              size: 26,
+              color: dark ? Colors.white : accentColor,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _attachmentTypeLabelFor(attachment.mimeType),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: dark ? Colors.white : AppTheme.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _formatBytes(attachment.sizeBytes),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.7)
+                    : AppTheme.ink.withValues(alpha: 0.68),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RequestThreadNote extends StatelessWidget {
   const _RequestThreadNote({required this.message, required this.dark});
 
@@ -544,6 +1002,10 @@ IconData _attachmentIconFor(String mimeType) {
   }
 
   return Icons.attach_file_rounded;
+}
+
+bool _isImageAttachment(String mimeType) {
+  return mimeType.startsWith('image/');
 }
 
 String _attachmentTypeLabelFor(String mimeType) {

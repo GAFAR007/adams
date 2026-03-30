@@ -75,6 +75,7 @@ class AuthController extends Notifier<AuthState> {
     required String email,
     required String phone,
     required String password,
+    required String verificationToken,
   }) async {
     await _runAuthAction(() async {
       final session = await _authRepository.registerCustomer(
@@ -83,6 +84,7 @@ class AuthController extends Notifier<AuthState> {
         email: email,
         phone: phone,
         password: password,
+        verificationToken: verificationToken,
       );
       _ensureRole(
         session,

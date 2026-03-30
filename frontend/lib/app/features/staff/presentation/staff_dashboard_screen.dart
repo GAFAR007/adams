@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
+import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/data/internal_chat_repository.dart';
 import '../../../shared/presentation/invoice_draft_dialog.dart';
 import '../../../shared/presentation/presence_chip.dart';
@@ -18,6 +19,7 @@ import '../../../shared/presentation/request_thread_section.dart';
 import '../../../shared/presentation/status_chip.dart';
 import '../../../shared/presentation/workspace_bottom_nav.dart';
 import '../../../shared/utils/external_url_opener.dart';
+import '../../../shared/utils/request_attachment_picker.dart';
 import '../../../shared/utils/text_file_downloader.dart';
 import '../../../theme/app_theme.dart';
 import '../../auth/application/auth_controller.dart';
@@ -57,6 +59,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   final Map<String, String> _selectedStatuses = <String, String>{};
   final Map<String, TextEditingController> _messageControllers =
       <String, TextEditingController>{};
+  final ScrollController _requestThreadScrollController = ScrollController();
   final Map<String, DateTime> _lastViewedActivityByRequestId =
       <String, DateTime>{};
   final Map<String, double> _conversationScrollOffsetsByRequestId =
@@ -64,9 +67,11 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   final Set<String> _attendingQueueIds = <String>{};
   final Set<String> _updatingAiControlIds = <String>{};
   final Set<String> _sendingMessageIds = <String>{};
+  final Set<String> _uploadingAttachmentIds = <String>{};
   final Set<String> _sendingInvoiceIds = <String>{};
   final Set<String> _reviewingPaymentProofIds = <String>{};
   final Set<String> _savingStatusIds = <String>{};
+  String? _lastThreadScrollSignature;
   _StaffInboxFilter _selectedFilter = _StaffInboxFilter.waiting;
   _StaffWorkspaceTab _selectedWorkspaceTab = _StaffWorkspaceTab.queue;
   String? _selectedRequestId;
@@ -78,6 +83,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     for (final controller in _messageControllers.values) {
       controller.dispose();
     }
+    _requestThreadScrollController.dispose();
     super.dispose();
   }
 
@@ -224,6 +230,62 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _sendingMessageIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _uploadRequestAttachment(ServiceRequestModel request) async {
+    if (request.status == 'closed') {
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    final pickedFile = await pickRequestAttachmentFile();
+    if (pickedFile == null) {
+      return;
+    }
+
+    final controller = _controllerFor(request.id);
+    final caption = controller.text.trim();
+
+    setState(() => _uploadingAttachmentIds.add(request.id));
+    debugPrint(
+      'StaffDashboardScreen._uploadRequestAttachment: uploading attachment for ${request.id}',
+    );
+
+    try {
+      await ref
+          .read(staffRepositoryProvider)
+          .uploadRequestAttachment(
+            requestId: request.id,
+            bytes: pickedFile.bytes,
+            fileName: pickedFile.name,
+            mimeType: pickedFile.mimeType,
+            caption: caption.isEmpty ? null : caption,
+          );
+      controller.clear();
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Attachment sent')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _uploadingAttachmentIds.remove(request.id));
       }
     }
   }
@@ -902,10 +964,35 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   }
 
   void _openRequest(ServiceRequestModel request) {
+    _lastThreadScrollSignature = null;
     setState(() {
       _selectedWorkspaceTab = _workspaceTabForFilterValue(_selectedFilter);
       _selectedRequestId = request.id;
       _markRequestViewed(request);
+    });
+  }
+
+  void _scheduleThreadScrollToLatest(ServiceRequestModel? request) {
+    if (request == null) {
+      _lastThreadScrollSignature = null;
+      return;
+    }
+
+    final signature =
+        '${request.id}:${request.latestActivityAt?.millisecondsSinceEpoch ?? 0}:${request.messageCount}';
+    if (_lastThreadScrollSignature == signature) {
+      return;
+    }
+
+    _lastThreadScrollSignature = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_requestThreadScrollController.hasClients) {
+        return;
+      }
+
+      _requestThreadScrollController.jumpTo(
+        _requestThreadScrollController.position.maxScrollExtent,
+      );
     });
   }
 
@@ -2392,6 +2479,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
     final controller = _controllerFor(request.id);
     final isSending = _sendingMessageIds.contains(request.id);
+    final isUploadingAttachment = _uploadingAttachmentIds.contains(request.id);
     final composerEnabled =
         request.assignedStaff != null && request.status != 'closed';
     final aiCoverActive = _isAiCoverActive(request, currentAvailability);
@@ -2460,8 +2548,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                         return false;
                       },
                       child: SingleChildScrollView(
+                        controller: _requestThreadScrollController,
                         padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
                         child: RequestThreadSection(
+                          key: ValueKey<String>(request.id),
                           messages: request.messages,
                           viewerRole: 'staff',
                           dark: true,
@@ -2476,6 +2566,17 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                     padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
                     child: RequestMessageComposer(
                       controller: controller,
+                      leadingActions: <Widget>[
+                        _StaffComposerActionButton(
+                          tooltip: 'Upload file',
+                          icon: isUploadingAttachment
+                              ? Icons.more_horiz_rounded
+                              : Icons.attach_file_rounded,
+                          onPressed: !composerEnabled || isUploadingAttachment
+                              ? null
+                              : () => _uploadRequestAttachment(request),
+                        ),
+                      ],
                       hintText: composerEnabled
                           ? aiCoverActive
                                 ? 'Reply here to take the chat back from Naima'
@@ -2539,6 +2640,16 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
+      next.whenData((event) {
+        if (!event.affectsRequests) {
+          return;
+        }
+
+        ref.invalidate(staffDashboardProvider);
+      });
+    });
+
     final bundleAsync = ref.watch(staffDashboardProvider);
     final authState = ref.watch(authControllerProvider);
     final internalChatUnreadAsync = ref.watch(
@@ -2625,6 +2736,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
               if (isConversationVisible) {
                 _scheduleMarkRequestViewed(selectedRequest);
+                _scheduleThreadScrollToLatest(selectedRequest);
               }
 
               if (isDesktop) {
@@ -2717,6 +2829,37 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
           );
         },
         orElse: () => null,
+      ),
+    );
+  }
+}
+
+class _StaffComposerActionButton extends StatelessWidget {
+  const _StaffComposerActionButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: onPressed == null ? 0.05 : 0.08),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(
+          icon,
+          color: Colors.white.withValues(alpha: onPressed == null ? 0.38 : 0.9),
+        ),
       ),
     );
   }

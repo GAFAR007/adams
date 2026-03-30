@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/internal_chat_model.dart';
+import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/data/internal_chat_repository.dart';
 import '../../../theme/app_theme.dart';
 
@@ -39,7 +40,6 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
   bool _isLoading = true;
   bool _isSendingMessage = false;
   String? _errorMessage;
-  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -47,17 +47,10 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadChats();
     });
-    _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (!mounted) {
-        return;
-      }
-      _loadChats(silent: true);
-    });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     _searchController.dispose();
     _composerController.dispose();
     super.dispose();
@@ -1263,6 +1256,16 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
+      next.whenData((event) {
+        if (!event.affectsInternalChats && !event.affectsInternalDirectory) {
+          return;
+        }
+
+        unawaited(_loadChats(silent: true));
+      });
+    });
+
     final visibleThreads = _visibleThreads();
 
     return LayoutBuilder(
