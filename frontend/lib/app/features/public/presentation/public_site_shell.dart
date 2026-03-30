@@ -8,7 +8,7 @@ import '../../../theme/app_theme.dart';
 
 enum PublicSiteLanguage { english, german }
 
-enum PublicNavItem { home, about, services, legal, contact }
+enum PublicNavItem { none, home, about, services, legal, contact }
 
 PublicSiteLanguage publicSiteLanguageFromCode(String? code) {
   return code == 'de' ? PublicSiteLanguage.german : PublicSiteLanguage.english;
@@ -427,7 +427,7 @@ class _PublicMainNav extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: _PublicAdminEntryButton(
                     label: resolvePublicText(profile.adminLoginLabel, language),
-                    onPressed: () => context.go('/admin/login'),
+                    onPressed: () => _go(context, '/admin/login', language),
                   ),
                 ),
               ],
@@ -456,7 +456,7 @@ class _PublicMainNav extends StatelessWidget {
                 const SizedBox(width: 22),
                 _PublicAdminEntryButton(
                   label: resolvePublicText(profile.adminLoginLabel, language),
-                  onPressed: () => context.go('/admin/login'),
+                  onPressed: () => _go(context, '/admin/login', language),
                 ),
               ],
             ),

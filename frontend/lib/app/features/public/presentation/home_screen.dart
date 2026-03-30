@@ -515,8 +515,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       customerLoginLabel: _text(
                                         profile.customerLoginLabel,
                                       ),
+                                      customerLoginPath: _routeWithLanguage(
+                                        '/login',
+                                      ),
                                       staffLoginLabel: _text(
                                         profile.staffLoginLabel,
+                                      ),
+                                      staffLoginPath: _routeWithLanguage(
+                                        '/staff/login',
                                       ),
                                       fastResponseLabel:
                                           _labels.heroFastResponseLabel,
@@ -575,8 +581,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     customerLoginLabel: _text(
                                       profile.customerLoginLabel,
                                     ),
+                                    customerLoginPath: _routeWithLanguage(
+                                      '/login',
+                                    ),
                                     staffLoginLabel: _text(
                                       profile.staffLoginLabel,
+                                    ),
+                                    staffLoginPath: _routeWithLanguage(
+                                      '/staff/login',
                                     ),
                                     fastResponseLabel:
                                         _labels.heroFastResponseLabel,
@@ -880,6 +892,9 @@ class _HeroTopBar extends StatelessWidget {
           language: language,
           companyName: companyName,
           adminLoginLabel: adminLoginLabel,
+          adminLoginPath: language == _PublicLanguage.german
+              ? '/admin/login?lang=de'
+              : '/admin/login',
           homeNavLabel: homeNavLabel,
           aboutNavLabel: aboutNavLabel,
           servicesNavLabel: servicesNavLabel,
@@ -999,6 +1014,7 @@ class _MainNavigationBar extends StatelessWidget {
     required this.language,
     required this.companyName,
     required this.adminLoginLabel,
+    required this.adminLoginPath,
     required this.homeNavLabel,
     required this.aboutNavLabel,
     required this.servicesNavLabel,
@@ -1018,6 +1034,7 @@ class _MainNavigationBar extends StatelessWidget {
   final _PublicLanguage language;
   final String companyName;
   final String adminLoginLabel;
+  final String adminLoginPath;
   final String homeNavLabel;
   final String aboutNavLabel;
   final String servicesNavLabel;
@@ -1131,7 +1148,7 @@ class _MainNavigationBar extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: _AdminEntryButton(
                     label: adminLoginLabel,
-                    onPressed: () => context.go('/admin/login'),
+                    onPressed: () => context.go(adminLoginPath),
                   ),
                 ),
               ],
@@ -1170,7 +1187,7 @@ class _MainNavigationBar extends StatelessWidget {
                 const SizedBox(width: 22),
                 _AdminEntryButton(
                   label: adminLoginLabel,
-                  onPressed: () => context.go('/admin/login'),
+                  onPressed: () => context.go(adminLoginPath),
                 ),
               ],
             ),
@@ -1659,7 +1676,9 @@ class _HeroCopy extends StatelessWidget {
     required this.bookServicePath,
     required this.createAccountLabel,
     required this.customerLoginLabel,
+    required this.customerLoginPath,
     required this.staffLoginLabel,
+    required this.staffLoginPath,
     required this.fastResponseLabel,
     required this.audienceLabel,
     required this.coverageLabel,
@@ -1674,7 +1693,9 @@ class _HeroCopy extends StatelessWidget {
   final String bookServicePath;
   final String createAccountLabel;
   final String customerLoginLabel;
+  final String customerLoginPath;
   final String staffLoginLabel;
+  final String staffLoginPath;
   final String fastResponseLabel;
   final String audienceLabel;
   final String coverageLabel;
@@ -1767,7 +1788,7 @@ class _HeroCopy extends StatelessWidget {
               child: Text(createAccountLabel),
             ),
             OutlinedButton(
-              onPressed: () => context.go('/login'),
+              onPressed: () => context.go(customerLoginPath),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
                 side: const BorderSide(color: Colors.white38),
@@ -1782,7 +1803,7 @@ class _HeroCopy extends StatelessWidget {
               child: Text(customerLoginLabel),
             ),
             TextButton(
-              onPressed: () => context.go('/staff/login'),
+              onPressed: () => context.go(staffLoginPath),
               style: TextButton.styleFrom(
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(

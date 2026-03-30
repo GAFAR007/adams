@@ -1250,7 +1250,11 @@ class _PublicBookingChatScreenState
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () => context.go('/login'),
+              onPressed: () => context.go(
+                _language == PublicSiteLanguage.german
+                    ? '/login?lang=de'
+                    : '/login',
+              ),
               child: Text(
                 isGerman
                     ? 'Bereits registriert? Login'

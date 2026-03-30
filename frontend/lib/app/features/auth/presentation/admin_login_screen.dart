@@ -8,21 +8,37 @@ import 'package:flutter/material.dart';
 import 'role_login_screen.dart';
 
 class AdminLoginScreen extends StatelessWidget {
-  const AdminLoginScreen({super.key});
+  const AdminLoginScreen({super.key, this.initialLanguageCode});
+
+  final String? initialLanguageCode;
 
   @override
   Widget build(BuildContext context) {
-    return const RoleLoginScreen(
+    return RoleLoginScreen(
       role: 'admin',
-      pageTitle: 'Admin Login',
-      headerTitle: 'Sign in to your operations space',
-      headerSubtitle:
-          'Manage the request queue, staff load, invites, and handoff performance.',
-      emailLabel: 'Admin email',
-      submitLabel: 'Enter Dashboard',
-      failureMessage: 'Use an admin account for this dashboard.',
+      copy: const RoleLoginCopy(
+        pageTitle: 'Admin Login',
+        pageTitleDe: 'Admin-Login',
+        eyebrow: 'Operations access',
+        eyebrowDe: 'Operations-Zugang',
+        headerTitle: 'Sign in to your operations space',
+        headerTitleDe: 'Melden Sie sich in Ihrem Operations-Bereich an',
+        headerSubtitle:
+            'Manage the request queue, staff load, invites, and handoff performance.',
+        headerSubtitleDe:
+            'Steuern Sie Queue, Team-Auslastung, Einladungen und Übergaben an einem Ort.',
+        emailLabel: 'Admin email',
+        emailLabelDe: 'Admin-E-Mail',
+        submitLabel: 'Enter Dashboard',
+        submitLabelDe: 'Zum Dashboard',
+        failureMessage: 'Use an admin account for this dashboard.',
+        failureMessageDe:
+            'Bitte verwenden Sie für dieses Dashboard ein Admin-Konto.',
+        heroVisualKey: 'legal',
+      ),
       successRoute: '/admin',
       icon: Icons.admin_panel_settings_rounded,
+      initialLanguageCode: initialLanguageCode,
     );
   }
 }

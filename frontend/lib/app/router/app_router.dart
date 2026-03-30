@@ -177,7 +177,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const CustomerLoginScreen(),
+            CustomerLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/register',
@@ -190,12 +192,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const AdminLoginScreen(),
+            AdminLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/staff/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const StaffLoginScreen(),
+            StaffLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/staff/register/:token',
