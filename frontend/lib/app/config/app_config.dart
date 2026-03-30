@@ -12,16 +12,29 @@ class AppConfig {
   );
 
   static const Map<String, String> serviceLabels = <String, String>{
+    'fire_damage_cleaning': 'Fire Damage Cleaning',
+    'needle_sweeps_sharps_cleanups': 'Needle Sweeps & Sharps Clean-Ups',
+    'hoarding_cleanups': 'Hoarding Clean-Ups',
+    'trauma_decomposition_cleanups': 'Trauma & Decomposition Clean-Ups',
+    'infection_control_cleaning': 'Infection Control Cleaning',
     'building_cleaning': 'Building Cleaning',
+    'window_cleaning': 'Window Cleaning',
+    'office_cleaning': 'Office Cleaning',
+    'house_cleaning': 'House Cleaning',
     'warehouse_hall_cleaning': 'Warehouse & Hall Cleaning',
-    'window_glass_cleaning': 'Window & Glass Cleaning',
     'winter_service': 'Winter Service',
     'caretaker_service': 'Caretaker Service',
     'garden_care': 'Garden Care',
     'post_construction_cleaning': 'Post-Construction Cleaning',
   };
 
+  static const Map<String, String> _legacyServiceLabels = <String, String>{
+    'window_glass_cleaning': 'Window & Glass Cleaning',
+  };
+
   static String serviceLabelFor(String serviceType) {
-    return serviceLabels[serviceType] ?? serviceType;
+    return serviceLabels[serviceType] ??
+        _legacyServiceLabels[serviceType] ??
+        serviceType;
   }
 }

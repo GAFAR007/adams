@@ -15,7 +15,6 @@ const {
 const {
   REQUEST_SOURCES,
   REQUEST_STATUSES,
-  SERVICE_TYPES,
   STAFF_AVAILABILITIES,
   USER_ROLES,
   USER_STATUSES,
@@ -87,12 +86,12 @@ async function runSeed() {
       de: "Umzug, Reinigung und Instandhaltung.",
     },
     heroTitle: {
-      en: "Cleaning and facility support for homes, offices, and properties in Mönchengladbach.",
-      de: "Reinigungs- und Facility-Service für Wohnungen, Büros und Objekte in Mönchengladbach.",
+      en: "Specialist cleaning and facility support for homes, workplaces, and properties in Mönchengladbach.",
+      de: "Spezialreinigung und Facility-Service für Wohnungen, Arbeitsplätze und Objekte in Mönchengladbach.",
     },
     heroSubtitle: {
-      en: "CL Logistic and Facility Management UG provides direct local support, fast contact, and structured service requests from one place.",
-      de: "CL Logistic and Facility Management UG bietet direkten lokalen Support, schnellen Kontakt und strukturierte Serviceanfragen an einem Ort.",
+      en: "CL Logistic and Facility Management UG provides direct local support for specialist clean-ups, infection control, and dependable day-to-day cleaning from one place.",
+      de: "CL Logistic and Facility Management UG bietet direkten lokalen Support für Spezialreinigungen, Infektionsschutz und verlässliche Alltagsreinigung an einem Ort.",
     },
     adminLoginLabel: {
       en: "Admin Login",
@@ -111,29 +110,29 @@ async function runSeed() {
       de: "Mitarbeiter-Login",
     },
     heroPanelTitle: {
-      en: "Reliable support for clean, welcoming spaces",
-      de: "Verlässliche Unterstützung für saubere, einladende Räume",
+      en: "Specialist response and dependable everyday support",
+      de: "Spezialeinsätze und verlässliche Unterstützung im Alltag",
     },
     heroPanelSubtitle: {
-      en: "CL Facility Management supports homes, offices, and shared buildings in Mönchengladbach with practical, dependable cleaning.",
-      de: "CL Facility Management unterstützt Wohnungen, Büros und Gemeinschaftsflächen in Mönchengladbach mit praktischer und verlässlicher Reinigung.",
+      en: "From trauma, fire, hoarding, and infection-control cleaning to regular building, office, and home support, CL Facility Management helps properties return to a safe, presentable standard.",
+      de: "Von Trauma-, Brand-, Messie- und Infektionsschutzreinigung bis zur regelmäßigen Betreuung von Gebäuden, Büros und Wohnungen hilft CL Facility Management dabei, Objekte wieder in einen sicheren und gepflegten Zustand zu bringen.",
     },
     heroBullets: [
       {
-        en: "Regular and one-off cleaning arranged around the property, schedule, and day-to-day needs.",
-        de: "Regelmäßige und einmalige Reinigungen, abgestimmt auf Objekt, Zeitplan und den Alltag vor Ort.",
+        en: "Specialist cleaning for fire damage, trauma, hoarding situations, sharps, and hygiene-critical environments.",
+        de: "Spezialreinigung für Brandschäden, Trauma-Situationen, Messie-Fälle, Sharps-Funde und hygienekritische Umgebungen.",
       },
       {
-        en: "Direct contact for quotes, scheduling, and practical service questions when needed.",
-        de: "Direkter Kontakt für Angebote, Terminabstimmung und praktische Servicefragen, wenn Unterstützung gebraucht wird.",
+        en: "Discreet, practical support when properties need resetting after difficult incidents or unsafe conditions.",
+        de: "Diskrete und praktische Unterstützung, wenn Objekte nach belastenden Vorfällen oder unsicheren Zuständen wiederhergestellt werden müssen.",
       },
       {
-        en: "Local support across Mönchengladbach for homes, offices, windows, and shared spaces.",
-        de: "Lokale Unterstützung in Mönchengladbach für Wohnungen, Büros, Fenster und Gemeinschaftsflächen.",
+        en: "Regular support across Mönchengladbach for buildings, offices, homes, windows, and shared spaces.",
+        de: "Regelmäßige Unterstützung in Mönchengladbach für Gebäude, Büros, Wohnungen, Fenster und Gemeinschaftsflächen.",
       },
       {
-        en: "A cleaner presentation and a more dependable day-to-day experience for customers, residents, and teams.",
-        de: "Ein gepflegter Auftritt und ein verlässlicherer Alltag für Kundschaft, Bewohner und Teams.",
+        en: "Direct contact for quotes, scheduling, urgent specialist clean-ups, and practical service questions.",
+        de: "Direkter Kontakt für Angebote, Terminabstimmung, dringende Spezialreinigungen und praktische Servicefragen.",
       },
     ],
     servicesTitle: {
@@ -141,10 +140,45 @@ async function runSeed() {
       de: "Leistungen",
     },
     serviceCardSubtitle: {
-      en: "Tell the team what needs attention and they can review it through the request queue.",
-      de: "Beschreibe dem Team, was erledigt werden muss, und die Anfrage wird über die Queue geprüft.",
+      en: "Choose the specialist or everyday cleaning service you need and the team can review it through the request queue.",
+      de: "Wählen Sie die gewünschte Spezial- oder Alltagsreinigung, dann prüft das Team die Anfrage über die Queue.",
     },
     serviceLabels: [
+      {
+        key: "fire_damage_cleaning",
+        label: {
+          en: "Fire Damage Cleaning",
+          de: "Brandschadenreinigung",
+        },
+      },
+      {
+        key: "needle_sweeps_sharps_cleanups",
+        label: {
+          en: "Needle Sweeps & Sharps Clean-Ups",
+          de: "Nadelsuche & Sharps-Beseitigung",
+        },
+      },
+      {
+        key: "hoarding_cleanups",
+        label: {
+          en: "Hoarding Clean-Ups",
+          de: "Hoarding- und Messie-Reinigung",
+        },
+      },
+      {
+        key: "trauma_decomposition_cleanups",
+        label: {
+          en: "Trauma & Decomposition Clean-Ups",
+          de: "Trauma- und Leichenfundortreinigung",
+        },
+      },
+      {
+        key: "infection_control_cleaning",
+        label: {
+          en: "Infection Control Cleaning",
+          de: "Infektionsschutzreinigung",
+        },
+      },
       {
         key: "building_cleaning",
         label: {
@@ -349,7 +383,7 @@ async function runSeed() {
   await ServiceRequest.insertMany([
     {
       customer: customers[0]._id,
-      serviceType: SERVICE_TYPES[0],
+      serviceType: "building_cleaning",
       status:
         REQUEST_STATUSES.SUBMITTED,
       source: REQUEST_SOURCES.FORM,
@@ -385,7 +419,7 @@ async function runSeed() {
         buildAiMessage(
           buildQueueCreatedAiText({
             request: {
-              serviceType: SERVICE_TYPES[0],
+              serviceType: "building_cleaning",
               preferredTimeWindow: "Morning",
               location: {
                 city: "Monchengladbach",
@@ -401,7 +435,7 @@ async function runSeed() {
     },
     {
       customer: customers[1]._id,
-      serviceType: SERVICE_TYPES[1],
+      serviceType: "warehouse_hall_cleaning",
       status: REQUEST_STATUSES.ASSIGNED,
       source: REQUEST_SOURCES.FORM,
       location: {
@@ -453,7 +487,7 @@ async function runSeed() {
     },
     {
       customer: customers[0]._id,
-      serviceType: SERVICE_TYPES[2],
+      serviceType: "window_glass_cleaning",
       status: REQUEST_STATUSES.QUOTED,
       source: REQUEST_SOURCES.FORM,
       location: {
@@ -504,7 +538,7 @@ async function runSeed() {
     },
     {
       customer: customers[1]._id,
-      serviceType: SERVICE_TYPES[4],
+      serviceType: "caretaker_service",
       status: REQUEST_STATUSES.CLOSED,
       source: REQUEST_SOURCES.CHAT,
       location: {

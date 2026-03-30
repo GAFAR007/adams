@@ -7,7 +7,15 @@
 const DEFAULT_COMPANY_NAME = 'CL Facility Management';
 
 const DEFAULT_SERVICE_LABELS = Object.freeze({
+  fire_damage_cleaning: 'Fire Damage Cleaning',
+  needle_sweeps_sharps_cleanups: 'Needle Sweeps & Sharps Clean-Ups',
+  hoarding_cleanups: 'Hoarding Clean-Ups',
+  trauma_decomposition_cleanups: 'Trauma & Decomposition Clean-Ups',
+  infection_control_cleaning: 'Infection Control Cleaning',
   building_cleaning: 'Building Cleaning',
+  window_cleaning: 'Window Cleaning',
+  office_cleaning: 'Office Cleaning',
+  house_cleaning: 'House Cleaning',
   warehouse_hall_cleaning: 'Warehouse & Hall Cleaning',
   window_glass_cleaning: 'Window & Glass Cleaning',
   winter_service: 'Winter Service',
@@ -17,8 +25,24 @@ const DEFAULT_SERVICE_LABELS = Object.freeze({
 });
 
 const SERVICE_TALKING_POINTS = Object.freeze({
+  fire_damage_cleaning:
+    'fire damage cleanup, soot removal, and post-incident property recovery',
+  needle_sweeps_sharps_cleanups:
+    'needle sweeps, sharps collection, and safer access around affected areas',
+  hoarding_cleanups:
+    'hoarding clear-outs, waste removal, and practical property resets',
+  trauma_decomposition_cleanups:
+    'specialist trauma cleanup, decomposition remediation, and sensitive recovery work',
+  infection_control_cleaning:
+    'infection-control cleaning, high-touch disinfection, and hygiene-led resets',
   building_cleaning:
     'offices, shared areas, and routine building upkeep',
+  window_cleaning:
+    'glass, frames, and clearer day-to-day presentation',
+  office_cleaning:
+    'desks, meeting rooms, shared kitchens, and day-to-day office upkeep',
+  house_cleaning:
+    'occupied homes, reset work, and recurring domestic support',
   warehouse_hall_cleaning:
     'warehouse floors, dust control, and operational spaces',
   window_glass_cleaning:

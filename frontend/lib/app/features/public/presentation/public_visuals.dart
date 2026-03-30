@@ -40,6 +40,177 @@ String publicServiceHeroTag(String serviceKey) {
 
 PublicServiceVisualData publicServiceVisualForKey(String serviceKey) {
   switch (serviceKey) {
+    case 'fire_damage_cleaning':
+      return const PublicServiceVisualData(
+        icon: Icons.local_fire_department_rounded,
+        imageUrl:
+            'https://images.pexels.com/photos/36409941/pexels-photo-36409941.jpeg?auto=compress&cs=tinysrgb&w=1600',
+        eyebrow: LocalizedText(
+          en: 'After fire and smoke impact',
+          de: 'Nach Brand- und Rauchschaden',
+        ),
+        summary: LocalizedText(
+          en: 'Careful fire damage cleaning to remove soot, smoke residue, and the mess left behind after an incident.',
+          de: 'Sorgfältige Brandschadenreinigung zur Entfernung von Ruß, Rauchrückständen und Verschmutzungen nach einem Vorfall.',
+        ),
+        highlights: <LocalizedText>[
+          LocalizedText(
+            en: 'Soot, ash, and smoke residue from affected rooms and surfaces',
+            de: 'Ruß, Asche und Rauchrückstände in betroffenen Räumen und auf Oberflächen',
+          ),
+          LocalizedText(
+            en: 'Practical clean-up support before restoration, repairs, or re-occupation',
+            de: 'Praktische Reinigung vor Sanierung, Reparatur oder Wiederbezug',
+          ),
+          LocalizedText(
+            en: 'Handled discreetly with attention to safety, containment, and documentation',
+            de: 'Diskret durchgeführt mit Blick auf Sicherheit, Abschottung und Dokumentation',
+          ),
+        ],
+        metrics: <LocalizedText>[
+          LocalizedText(en: 'Soot removal', de: 'Rußentfernung'),
+          LocalizedText(en: 'Smoke residue', de: 'Rauchrückstände'),
+          LocalizedText(
+            en: 'Post-incident clean-up',
+            de: 'Reinigung nach Vorfall',
+          ),
+        ],
+      );
+    case 'needle_sweeps_sharps_cleanups':
+      return const PublicServiceVisualData(
+        icon: Icons.health_and_safety_rounded,
+        imageUrl:
+            'https://images.pexels.com/photos/4099087/pexels-photo-4099087.jpeg?auto=compress&cs=tinysrgb&w=1600',
+        eyebrow: LocalizedText(
+          en: 'Sharps and hazardous items',
+          de: 'Sharps und gefährliche Fundstücke',
+        ),
+        summary: LocalizedText(
+          en: 'Targeted needle sweeps and sharps clean-ups for entrances, grounds, shared areas, and sensitive properties.',
+          de: 'Gezielte Nadelsuche und Sharps-Beseitigung für Eingänge, Außenflächen, Gemeinschaftsbereiche und sensible Objekte.',
+        ),
+        highlights: <LocalizedText>[
+          LocalizedText(
+            en: 'Safe collection of needles, blades, and exposed sharps',
+            de: 'Sichere Aufnahme von Nadeln, Klingen und offen liegenden Sharps',
+          ),
+          LocalizedText(
+            en: 'Suitable for housing blocks, public areas, business sites, and access routes',
+            de: 'Geeignet für Wohnanlagen, öffentliche Bereiche, Gewerbestandorte und Zugangswege',
+          ),
+          LocalizedText(
+            en: 'Helps restore safer day-to-day access for residents, staff, and visitors',
+            de: 'Hilft dabei, sichere Zugänge für Bewohner, Mitarbeitende und Besucher wiederherzustellen',
+          ),
+        ],
+        metrics: <LocalizedText>[
+          LocalizedText(en: 'Needle sweeps', de: 'Nadelsuche'),
+          LocalizedText(en: 'Sharps disposal', de: 'Sharps-Entsorgung'),
+          LocalizedText(en: 'Safer access', de: 'Sicherere Zugänge'),
+        ],
+      );
+    case 'hoarding_cleanups':
+      return const PublicServiceVisualData(
+        icon: Icons.inventory_2_rounded,
+        imageUrl:
+            'https://images.pexels.com/photos/6195288/pexels-photo-6195288.jpeg?auto=compress&cs=tinysrgb&w=1600',
+        eyebrow: LocalizedText(
+          en: 'Resetting overwhelmed spaces',
+          de: 'Überforderte Räume neu ordnen',
+        ),
+        summary: LocalizedText(
+          en: 'Sensitive hoarding clean-ups that help clear heavily affected rooms and bring properties back toward a usable standard.',
+          de: 'Einfühlsame Hoarding-Reinigungen, die stark betroffene Räume entlasten und Objekte wieder in einen nutzbaren Zustand bringen.',
+        ),
+        highlights: <LocalizedText>[
+          LocalizedText(
+            en: 'Decluttering, waste removal, and practical cleaning after heavy buildup',
+            de: 'Entrümpelung, Entsorgung und praktische Reinigung bei starker Ansammlung',
+          ),
+          LocalizedText(
+            en: 'Works for homes, tenancies, inherited properties, and managed units',
+            de: 'Geeignet für Wohnungen, Mietobjekte, Nachlassobjekte und verwaltete Einheiten',
+          ),
+          LocalizedText(
+            en: 'Approached discreetly and without adding pressure to difficult situations',
+            de: 'Diskret umgesetzt, ohne schwierige Situationen zusätzlich zu belasten',
+          ),
+        ],
+        metrics: <LocalizedText>[
+          LocalizedText(en: 'Decluttering', de: 'Entrümpelung'),
+          LocalizedText(en: 'Waste removal', de: 'Entsorgung'),
+          LocalizedText(en: 'Property reset', de: 'Objekt-Reset'),
+        ],
+      );
+    case 'trauma_decomposition_cleanups':
+      return const PublicServiceVisualData(
+        icon: Icons.healing_rounded,
+        imageUrl:
+            'https://images.pexels.com/photos/4176365/pexels-photo-4176365.jpeg?auto=compress&cs=tinysrgb&w=1600',
+        eyebrow: LocalizedText(
+          en: 'Sensitive scene remediation',
+          de: 'Sensible Einsatzstellen-Reinigung',
+        ),
+        summary: LocalizedText(
+          en: 'Specialist trauma and decomposition clean-ups focused on safe remediation, discretion, and restoring affected properties.',
+          de: 'Spezialisierte Trauma- und Leichenfundortreinigung mit Fokus auf sichere Wiederherstellung, Diskretion und die Rückführung betroffener Objekte.',
+        ),
+        highlights: <LocalizedText>[
+          LocalizedText(
+            en: 'For unexpected deaths, traumatic incidents, and serious contamination events',
+            de: 'Für Todesfälle, traumatische Ereignisse und schwere Kontaminationslagen',
+          ),
+          LocalizedText(
+            en: 'Handled with controlled cleaning, deodorisation, and careful site attention',
+            de: 'Durchgeführt mit kontrollierter Reinigung, Geruchsbehandlung und sorgfältiger Objektbetreuung',
+          ),
+          LocalizedText(
+            en: 'Suitable for private homes, rentals, workplaces, and managed properties',
+            de: 'Geeignet für Privatwohnungen, Mietobjekte, Arbeitsplätze und verwaltete Immobilien',
+          ),
+        ],
+        metrics: <LocalizedText>[
+          LocalizedText(en: 'Sensitive clean-up', de: 'Sensible Reinigung'),
+          LocalizedText(en: 'Odour treatment', de: 'Geruchsbehandlung'),
+          LocalizedText(
+            en: 'Safe remediation',
+            de: 'Sichere Wiederherstellung',
+          ),
+        ],
+      );
+    case 'infection_control_cleaning':
+      return const PublicServiceVisualData(
+        icon: Icons.coronavirus_rounded,
+        imageUrl:
+            'https://images.pexels.com/photos/4099267/pexels-photo-4099267.jpeg?auto=compress&cs=tinysrgb&w=1600',
+        eyebrow: LocalizedText(
+          en: 'Targeted hygiene control',
+          de: 'Gezielte Hygienekontrolle',
+        ),
+        summary: LocalizedText(
+          en: 'Infection control cleaning for high-risk touchpoints, contaminated areas, and environments that need a stricter hygiene response.',
+          de: 'Infektionsschutzreinigung für Hochrisiko-Kontaktflächen, kontaminierte Bereiche und Umgebungen mit erhöhten Hygieneanforderungen.',
+        ),
+        highlights: <LocalizedText>[
+          LocalizedText(
+            en: 'High-touch disinfection for rooms, washrooms, access points, and shared surfaces',
+            de: 'Desinfektion von Räumen, Sanitärbereichen, Zugängen und häufig berührten Flächen',
+          ),
+          LocalizedText(
+            en: 'Supports outbreak response, precautionary deep cleaning, and safer reopening',
+            de: 'Unterstützt Ausbruchslagen, vorsorgliche Grundreinigung und eine sicherere Wiederöffnung',
+          ),
+          LocalizedText(
+            en: 'Useful for workplaces, communal buildings, healthcare-adjacent spaces, and homes',
+            de: 'Geeignet für Arbeitsplätze, Gemeinschaftsgebäude, gesundheitsnahe Bereiche und Wohnungen',
+          ),
+        ],
+        metrics: <LocalizedText>[
+          LocalizedText(en: 'Disinfection', de: 'Desinfektion'),
+          LocalizedText(en: 'High-touch areas', de: 'Kontaktflächen'),
+          LocalizedText(en: 'Safer reopening', de: 'Sicherer Neustart'),
+        ],
+      );
     case 'building_cleaning':
       return const PublicServiceVisualData(
         icon: Icons.apartment_rounded,

@@ -65,7 +65,15 @@ const REQUEST_SOURCES = Object.freeze({
 });
 
 const SERVICE_TYPES = Object.freeze([
+  'fire_damage_cleaning',
+  'needle_sweeps_sharps_cleanups',
+  'hoarding_cleanups',
+  'trauma_decomposition_cleanups',
+  'infection_control_cleaning',
   'building_cleaning',
+  'window_cleaning',
+  'office_cleaning',
+  'house_cleaning',
   'warehouse_hall_cleaning',
   'window_glass_cleaning',
   'winter_service',
