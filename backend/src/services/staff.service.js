@@ -27,6 +27,7 @@ const {
 } = require('../utils/payment-provider');
 const {
   buildAiMessage,
+  buildRequestMessageAttachment,
   buildStaffMessage,
   buildSystemMessage,
 } = require('../utils/request-chat');
@@ -43,6 +44,7 @@ const {
   syncOnlineInvoicePaymentIfNeeded,
 } = require('../utils/request-payment-status');
 const { serializeServiceRequest, serializeUser } = require('../utils/serializers');
+const { storeRequestAttachmentFile } = require('./file-storage.service');
 const { issueSessionTokens, verifyStaffInviteToken } = require('./token.service');
 
 const STAFF_MANAGEABLE_STATUSES = [
@@ -605,6 +607,109 @@ async function postAssignedRequestMessage(
   };
 }
 
+async function uploadAssignedRequestAttachment(
+  staffUserId,
+  requestId,
+  file,
+  caption,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'StaffUploadRequestAttachment',
+    intent: 'Append a staff attachment onto an assigned customer thread',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'StaffUploadRequestAttachment',
+    intent: 'Load the staff account and assigned request before uploading an attachment reply',
+  });
+
+  const [staff, request] = await Promise.all([
+    loadActiveStaffUser(staffUserId),
+    loadAssignedRequest(requestId, staffUserId),
+  ]);
+
+  if (!staff) {
+    throw new AppError({
+      message: 'Staff account not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_ATTACHMENT_USER_NOT_FOUND',
+      resolutionHint: 'Log in again and try once more',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (!request) {
+    throw new AppError({
+      message: 'Assigned request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_ATTACHMENT_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your dashboard and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept new chat attachments',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'STAFF_ATTACHMENT_REQUEST_CLOSED',
+      resolutionHint: 'Open another active request thread instead',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!file) {
+    throw new AppError({
+      message: 'Attachment file is required',
+      statusCode: 400,
+      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
+      errorCode: 'STAFF_ATTACHMENT_FILE_REQUIRED',
+      resolutionHint: 'Choose a file and try again',
+      step: LOG_STEPS.VALIDATION_FAIL,
+    });
+  }
+
+  const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
+  const storedAttachment = await storeRequestAttachmentFile(file, logContext);
+  request.messages.push(
+    buildStaffMessage({
+      staffId: staffUserId,
+      staffName: `${staff.firstName} ${staff.lastName}`.trim(),
+      text:
+        trimmedCaption.length === 0
+          ? `Shared a file: ${storedAttachment.originalName || 'attachment'}`
+          : trimmedCaption,
+      attachment: buildRequestMessageAttachment(storedAttachment),
+    }),
+  );
+  request.attendedAt = request.attendedAt || new Date();
+  request.aiControlEnabled = false;
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'StaffUploadRequestAttachment',
+    intent: 'Confirm the staff attachment was appended to the assigned request thread',
+  });
+
+  return {
+    message: 'Attachment sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
 async function updateAssignedRequestAiControl(
   staffUserId,
   requestId,
@@ -979,6 +1084,7 @@ module.exports = {
   getDashboard,
   listAssignedRequests,
   postAssignedRequestMessage,
+  uploadAssignedRequestAttachment,
   registerFromInvite,
   reviewAssignedRequestPaymentProof,
   updateAssignedRequestAiControl,

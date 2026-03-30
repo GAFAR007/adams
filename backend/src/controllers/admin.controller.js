@@ -7,6 +7,7 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const { emitRequestUpdated } = require('../realtime/socket');
 const adminService = require('../services/admin.service');
 
 const adminDashboardController = asyncHandler(async (req, res) => {
@@ -54,6 +55,7 @@ const adminAssignRequestController = asyncHandler(async (req, res) => {
   // WHY: The service owns assignment validation so the controller does not duplicate staff/request checks.
   const result = await adminService.assignRequest(req.params.requestId, req.body.staffId, logContext);
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -75,6 +77,53 @@ const adminCreateRequestInvoiceController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminPostRequestMessageController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminPostRequestMessage',
+    intent: 'Append an admin reply onto a request thread from the admin workspace',
+  });
+
+  const result = await adminService.postRequestMessage(
+    req.authUser,
+    req.params.requestId,
+    req.body.message,
+    req.body.actionType,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminUploadRequestAttachmentController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminUploadRequestAttachment',
+    intent: 'Upload an admin chat attachment into a request thread',
+  });
+
+  const result = await adminService.uploadRequestAttachment(
+    req.authUser,
+    req.params.requestId,
+    req.file,
+    req.body.caption,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -97,6 +146,7 @@ const adminReviewPaymentProofController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -179,7 +229,9 @@ module.exports = {
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
+  adminPostRequestMessageController,
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminUploadRequestAttachmentController,
 };

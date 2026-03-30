@@ -27,6 +27,7 @@ const {
 } = require('../utils/payment-provider');
 const {
   buildAdminMessage,
+  buildRequestMessageAttachment,
   buildSystemMessage,
 } = require('../utils/request-chat');
 const {
@@ -41,6 +42,7 @@ const {
   syncOnlineInvoicePaymentIfNeeded,
 } = require('../utils/request-payment-status');
 const { serializeServiceRequest, serializeStaffInvite, serializeUser } = require('../utils/serializers');
+const { storeRequestAttachmentFile } = require('./file-storage.service');
 const { buildStaffInviteLink } = require('./token.service');
 
 async function syncRequestCollectionInvoices(requests) {
@@ -305,6 +307,152 @@ async function loadAdminVisibleRequest(requestId) {
   return ServiceRequest.findById(requestId)
     .populate('customer', 'firstName lastName email phone role status staffAvailability createdAt updatedAt')
     .populate('assignedStaff', 'firstName lastName email phone role status staffAvailability createdAt updatedAt');
+}
+
+async function postRequestMessage(adminUser, requestId, text, actionType, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'AdminPostRequestMessage',
+    intent: 'Append an admin reply onto a customer request thread',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'AdminPostRequestMessage',
+    intent: 'Load the request before appending an admin chat reply',
+  });
+
+  const request = await loadAdminVisibleRequest(requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Service request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_MESSAGE_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh the request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept new replies',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_MESSAGE_REQUEST_CLOSED',
+      resolutionHint: 'Open another active request thread instead',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  request.messages.push(
+    buildAdminMessage({
+      adminId: adminUser.id,
+      adminName: 'Admin Team',
+      actionType,
+      text,
+    }),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'AdminPostRequestMessage',
+    intent: 'Confirm the admin reply was appended to the request thread',
+  });
+
+  return {
+    message: 'Reply sent successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
+async function uploadRequestAttachment(adminUser, requestId, file, caption, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'AdminUploadRequestAttachment',
+    intent: 'Append an admin attachment onto a request thread',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'AdminUploadRequestAttachment',
+    intent: 'Load the request before appending an admin attachment message',
+  });
+
+  const request = await loadAdminVisibleRequest(requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Service request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_ATTACHMENT_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh the request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept new chat attachments',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_ATTACHMENT_REQUEST_CLOSED',
+      resolutionHint: 'Open another active request thread instead',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!file) {
+    throw new AppError({
+      message: 'Attachment file is required',
+      statusCode: 400,
+      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
+      errorCode: 'ADMIN_ATTACHMENT_FILE_REQUIRED',
+      resolutionHint: 'Choose a file and try again',
+      step: LOG_STEPS.VALIDATION_FAIL,
+    });
+  }
+
+  const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
+  const storedAttachment = await storeRequestAttachmentFile(file, logContext);
+  request.messages.push(
+    buildAdminMessage({
+      adminId: adminUser.id,
+      adminName: 'Admin Team',
+      text:
+        trimmedCaption.length === 0
+          ? `Shared a file: ${storedAttachment.originalName || 'attachment'}`
+          : trimmedCaption,
+      attachment: buildRequestMessageAttachment(storedAttachment),
+    }),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'AdminUploadRequestAttachment',
+    intent: 'Confirm the admin attachment was appended to the request thread',
+  });
+
+  return {
+    message: 'Attachment sent successfully',
+    request: serializeServiceRequest(request),
+  };
 }
 
 async function createRequestInvoice(adminUser, requestId, payload, logContext) {
@@ -754,5 +902,7 @@ module.exports = {
   listRequests,
   listStaff,
   listStaffInvites,
+  postRequestMessage,
   reviewPaymentProof,
+  uploadRequestAttachment,
 };

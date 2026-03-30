@@ -7,7 +7,9 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const { emitRequestUpdated } = require('../realtime/socket');
 const customerService = require('../services/customer.service');
+const addressValidationService = require('../services/address-validation.service');
 
 const customerCreateRequestController = asyncHandler(async (req, res) => {
   // WHY: Keep one trace context for the full customer-request creation flow.
@@ -20,6 +22,7 @@ const customerCreateRequestController = asyncHandler(async (req, res) => {
   // WHY: The service owns customer lookup and request persistence so request rules stay centralized.
   const result = await customerService.createRequest(req.authUser.id, req.body, logContext);
   res.status(201).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -59,6 +62,7 @@ const customerPostRequestMessageController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -80,6 +84,7 @@ const customerUpdateRequestController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -102,6 +107,7 @@ const customerUploadPaymentProofController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -126,6 +132,7 @@ const customerUploadRequestAttachmentController = asyncHandler(
       logContext,
     );
     res.status(200).json(result);
+    emitRequestUpdated(result.request);
 
     logInfo({
       ...logContext,
@@ -134,7 +141,50 @@ const customerUploadRequestAttachmentController = asyncHandler(
   },
 );
 
+const customerVerifyAddressController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'CustomerAddressVerification',
+    intent:
+      'Verify a typed customer request address and derive city plus postal code before submission',
+  });
+
+  const verification = await addressValidationService.verifyAddress(
+    req.body.addressLine1,
+    logContext,
+    req.body.placeId,
+  );
+  res.status(200).json({ verification });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const customerAutocompleteAddressController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'CustomerAddressAutocomplete',
+    intent:
+      'Return live Germany-only address predictions for the customer request intake chat',
+  });
+
+  const predictions = await addressValidationService.autocompleteAddress(
+    req.query.input,
+    logContext,
+  );
+  res.status(200).json({ predictions });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 module.exports = {
+  customerAutocompleteAddressController,
+  customerVerifyAddressController,
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,

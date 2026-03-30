@@ -136,11 +136,11 @@ function buildInvoiceRequestMessage(invoice) {
 function attachProofToInvoice(invoice, file, note = '') {
   invoice.status = PAYMENT_REQUEST_STATUSES.PROOF_SUBMITTED;
   invoice.proof = {
-    originalName: file.originalname,
-    storedName: file.filename,
-    mimeType: file.mimetype,
-    sizeBytes: file.size,
-    relativeUrl: `/uploads/payment-proofs/${file.filename}`,
+    originalName: file.originalName || file.originalname || 'proof',
+    storedName: file.storedName || file.filename || '',
+    mimeType: file.mimeType || file.mimetype || 'application/octet-stream',
+    sizeBytes: file.sizeBytes || file.size || 0,
+    relativeUrl: file.relativeUrl || '',
     uploadedAt: new Date(),
     note: note.trim(),
   };

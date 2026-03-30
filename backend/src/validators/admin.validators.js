@@ -5,7 +5,10 @@
  */
 
 const { body, param, query } = require('express-validator');
-const { PAYMENT_METHODS } = require('../constants/app.constants');
+const {
+  PAYMENT_METHODS,
+  REQUEST_MESSAGE_ACTIONS,
+} = require('../constants/app.constants');
 const { optionalPhoneValidator } = require('./phone.validators');
 
 const adminRequestFiltersValidator = [
@@ -54,6 +57,27 @@ const adminCreateRequestInvoiceValidator = [
     .withMessage('Invoice note must be 2000 characters or fewer'),
 ];
 
+const adminPostRequestMessageValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('message')
+    .trim()
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('Message must be between 1 and 2000 characters'),
+  body('actionType')
+    .optional({ nullable: true })
+    .isIn(Object.values(REQUEST_MESSAGE_ACTIONS))
+    .withMessage('Action type is invalid'),
+];
+
+const adminUploadRequestAttachmentValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('caption')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Attachment caption must be 500 characters or fewer'),
+];
+
 const adminReviewPaymentProofValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
   body('decision')
@@ -72,6 +96,8 @@ module.exports = {
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
   adminDeleteStaffInviteValidator,
+  adminPostRequestMessageValidator,
   adminRequestFiltersValidator,
   adminReviewPaymentProofValidator,
+  adminUploadRequestAttachmentValidator,
 };

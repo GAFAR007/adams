@@ -26,16 +26,16 @@ function buildBaseMessage({
   };
 }
 
-function buildRequestMessageAttachment(file, relativeUrl) {
+function buildRequestMessageAttachment(file, relativeUrl = file?.relativeUrl) {
   if (!file || !relativeUrl) {
     return null;
   }
 
   return {
-    originalName: file.originalname || 'attachment',
-    storedName: file.filename || '',
-    mimeType: file.mimetype || 'application/octet-stream',
-    sizeBytes: file.size || 0,
+    originalName: file.originalName || file.originalname || 'attachment',
+    storedName: file.storedName || file.filename || '',
+    mimeType: file.mimeType || file.mimetype || 'application/octet-stream',
+    sizeBytes: file.sizeBytes || file.size || 0,
     relativeUrl,
   };
 }
@@ -58,7 +58,13 @@ function buildCustomerMessage({
   });
 }
 
-function buildStaffMessage({ staffId, staffName, text, actionType = null }) {
+function buildStaffMessage({
+  staffId,
+  staffName,
+  text,
+  actionType = null,
+  attachment = null,
+}) {
   // WHY: Staff replies need the responder identity so customers know exactly who joined the thread.
   return buildBaseMessage({
     senderType: REQUEST_MESSAGE_SENDERS.STAFF,
@@ -66,10 +72,17 @@ function buildStaffMessage({ staffId, staffName, text, actionType = null }) {
     senderName: staffName,
     actionType,
     text,
+    attachment,
   });
 }
 
-function buildAdminMessage({ adminId, adminName, text, actionType = null }) {
+function buildAdminMessage({
+  adminId,
+  adminName,
+  text,
+  actionType = null,
+  attachment = null,
+}) {
   // WHY: Admin-authored workflow messages should still render like a human participant instead of a system note.
   return buildBaseMessage({
     senderType: REQUEST_MESSAGE_SENDERS.ADMIN,
@@ -77,6 +90,7 @@ function buildAdminMessage({ adminId, adminName, text, actionType = null }) {
     senderName: adminName,
     actionType,
     text,
+    attachment,
   });
 }
 

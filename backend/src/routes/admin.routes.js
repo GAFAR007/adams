@@ -13,9 +13,11 @@ const {
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
+  adminPostRequestMessageController,
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminUploadRequestAttachmentController,
 } = require("../controllers/admin.controller");
 const {
   createDirectInternalChatController,
@@ -28,6 +30,9 @@ const {
   USER_ROLES,
 } = require("../constants/app.constants");
 const {
+  requestAttachmentUploadMiddleware,
+} = require("../middleware/upload.middleware");
+const {
   requireAuth,
   requireRoles,
 } = require("../middleware/auth.middleware");
@@ -39,8 +44,10 @@ const {
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
   adminDeleteStaffInviteValidator,
+  adminPostRequestMessageValidator,
   adminRequestFiltersValidator,
   adminReviewPaymentProofValidator,
+  adminUploadRequestAttachmentValidator,
 } = require("../validators/admin.validators");
 const {
   createDirectInternalChatValidator,
@@ -72,6 +79,19 @@ function createAdminRouter() {
     adminAssignRequestValidator,
     validateRequest,
     adminAssignRequestController,
+  );
+  router.post(
+    "/requests/:requestId/messages",
+    adminPostRequestMessageValidator,
+    validateRequest,
+    adminPostRequestMessageController,
+  );
+  router.post(
+    "/requests/:requestId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    adminUploadRequestAttachmentValidator,
+    validateRequest,
+    adminUploadRequestAttachmentController,
   );
   router.post(
     "/requests/:requestId/invoice",

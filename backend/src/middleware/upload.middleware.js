@@ -1,14 +1,11 @@
 /**
  * WHAT: Handles multipart uploads for customer payment-proof and chat-attachment files.
  * WHY: Uploads need file-size and file-type limits before they reach service logic.
- * HOW: Use Multer disk storage with narrow allowlists and convert upload failures into the shared API error shape.
+ * HOW: Use Multer memory storage with narrow allowlists and convert upload failures into the shared API error shape.
  */
 
-const { randomUUID } = require('crypto');
-const fs = require('fs');
-const path = require('path');
-
 const multer = require('multer');
+const path = require('path');
 
 const {
   ERROR_CLASSIFICATIONS,
@@ -16,14 +13,6 @@ const {
 } = require('../constants/app.constants');
 const { AppError } = require('../utils/app-error');
 
-const paymentProofDirectory = path.resolve(
-  __dirname,
-  '../../uploads/payment-proofs',
-);
-const requestAttachmentDirectory = path.resolve(
-  __dirname,
-  '../../uploads/request-attachments',
-);
 const paymentProofMimeTypes = new Set([
   'application/pdf',
   'image/jpeg',
@@ -39,23 +28,7 @@ const requestAttachmentMimeTypes = new Set([
   'text/plain',
 ]);
 
-fs.mkdirSync(paymentProofDirectory, { recursive: true });
-fs.mkdirSync(requestAttachmentDirectory, { recursive: true });
-
-function createStorage(directory) {
-  return multer.diskStorage({
-    destination: (_req, _file, callback) => {
-      callback(null, directory);
-    },
-    filename: (_req, file, callback) => {
-      const extension = path.extname(file.originalname || '').toLowerCase();
-      callback(null, `${Date.now()}-${randomUUID()}${extension}`);
-    },
-  });
-}
-
 function createUpload({
-  directory,
   allowedMimeTypes,
   allowedExtensions = null,
   invalidTypeMessage,
@@ -64,7 +37,7 @@ function createUpload({
   fileSizeBytes,
 }) {
   return multer({
-    storage: createStorage(directory),
+    storage: multer.memoryStorage(),
     limits: {
       fileSize: fileSizeBytes,
     },
@@ -148,7 +121,6 @@ function buildUploadMiddleware({
 }
 
 const paymentProofUpload = createUpload({
-  directory: paymentProofDirectory,
   allowedMimeTypes: paymentProofMimeTypes,
   allowedExtensions: new Set(['.pdf', '.jpg', '.jpeg', '.png']),
   invalidTypeMessage: 'Only PNG, JPG, or PDF payment proof files are allowed',
@@ -158,7 +130,6 @@ const paymentProofUpload = createUpload({
 });
 
 const requestAttachmentUpload = createUpload({
-  directory: requestAttachmentDirectory,
   allowedMimeTypes: requestAttachmentMimeTypes,
   allowedExtensions: new Set([
     '.doc',

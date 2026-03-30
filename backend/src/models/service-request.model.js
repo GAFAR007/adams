@@ -4,7 +4,7 @@
  * HOW: Persist customer/contact details, location, status, source, and staff assignment metadata.
  */
 
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const {
   PAYMENT_METHODS,
@@ -15,54 +15,57 @@ const {
   REQUEST_STATUSES,
   SERVICE_TYPES,
   USER_ROLES,
-} = require('../constants/app.constants');
+} = require("../constants/app.constants");
 
-const requestMessageAttachmentSchema = new mongoose.Schema(
-  {
-    originalName: {
-      type: String,
-      required: true,
-      trim: true,
+const requestMessageAttachmentSchema =
+  new mongoose.Schema(
+    {
+      originalName: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+      storedName: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+      mimeType: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+      sizeBytes: {
+        type: Number,
+        required: true,
+        min: 1,
+      },
+      relativeUrl: {
+        type: String,
+        required: true,
+        trim: true,
+      },
     },
-    storedName: {
-      type: String,
-      required: true,
-      trim: true,
+    {
+      _id: false,
+      id: false,
     },
-    mimeType: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    sizeBytes: {
-      type: Number,
-      required: true,
-      min: 1,
-    },
-    relativeUrl: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-  },
-  {
-    _id: false,
-    id: false,
-  },
-);
+  );
 
 const requestMessageSchema = new mongoose.Schema(
   {
     senderType: {
       // WHY: The frontend needs to distinguish customer, staff, AI, and system messages when rendering the thread.
       type: String,
-      enum: Object.values(REQUEST_MESSAGE_SENDERS),
+      enum: Object.values(
+        REQUEST_MESSAGE_SENDERS,
+      ),
       required: true,
     },
     senderId: {
       // WHY: Human-authored messages keep an author reference for future audit and richer participant views.
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       default: null,
     },
     senderName: {
@@ -73,7 +76,9 @@ const requestMessageSchema = new mongoose.Schema(
     actionType: {
       // WHY: Structured message actions let the frontend render real affordances like request-update buttons in chat.
       type: String,
-      enum: Object.values(REQUEST_MESSAGE_ACTIONS),
+      enum: Object.values(
+        REQUEST_MESSAGE_ACTIONS,
+      ),
       default: null,
     },
     text: {
@@ -130,7 +135,7 @@ const paymentProofSchema = new mongoose.Schema(
     },
     note: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
   },
@@ -154,7 +159,7 @@ const requestInvoiceSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
-      default: 'EUR',
+      default: "EUR",
       trim: true,
     },
     dueDate: {
@@ -168,17 +173,19 @@ const requestInvoiceSchema = new mongoose.Schema(
     },
     paymentInstructions: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
     note: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
     status: {
       type: String,
-      enum: Object.values(PAYMENT_REQUEST_STATUSES),
+      enum: Object.values(
+        PAYMENT_REQUEST_STATUSES,
+      ),
       default: PAYMENT_REQUEST_STATUSES.SENT,
     },
     sentAt: {
@@ -192,7 +199,7 @@ const requestInvoiceSchema = new mongoose.Schema(
     },
     sentById: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
     reviewedAt: {
@@ -206,12 +213,12 @@ const requestInvoiceSchema = new mongoose.Schema(
     },
     reviewedById: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       default: null,
     },
     reviewNote: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
     paymentProvider: {
@@ -273,7 +280,7 @@ const serviceRequestSchema = new mongoose.Schema(
     customer: {
       // WHY: Keep a stable customer reference so request ownership can always be enforced from the DB.
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
       index: true,
     },
@@ -318,7 +325,7 @@ const serviceRequestSchema = new mongoose.Schema(
     },
     preferredTimeWindow: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
     invoice: {
@@ -348,13 +355,13 @@ const serviceRequestSchema = new mongoose.Schema(
       },
       phone: {
         type: String,
-        default: '',
+        default: "",
       },
     },
     assignedStaff: {
       // WHY: Keep direct assignee lookup cheap because dashboards and staff inboxes depend on it often.
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       default: null,
       index: true,
     },
@@ -400,10 +407,24 @@ const serviceRequestSchema = new mongoose.Schema(
 );
 
 // Inbox queries are driven by status and recency, so both should be indexed together.
-serviceRequestSchema.index({ status: 1, createdAt: -1 });
-serviceRequestSchema.index({ assignedStaff: 1, status: 1, createdAt: -1 });
-serviceRequestSchema.index({ status: 1, assignedStaff: 1, queueEnteredAt: 1 });
+serviceRequestSchema.index({
+  status: 1,
+  createdAt: -1,
+});
+serviceRequestSchema.index({
+  assignedStaff: 1,
+  status: 1,
+  createdAt: -1,
+});
+serviceRequestSchema.index({
+  status: 1,
+  assignedStaff: 1,
+  queueEnteredAt: 1,
+});
 
-const ServiceRequest = mongoose.model('ServiceRequest', serviceRequestSchema);
+const ServiceRequest = mongoose.model(
+  "ServiceRequest",
+  serviceRequestSchema,
+);
 
 module.exports = { ServiceRequest };

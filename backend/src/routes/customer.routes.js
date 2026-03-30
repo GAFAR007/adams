@@ -13,6 +13,8 @@ const {
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,
   customerUpdateRequestController,
+  customerAutocompleteAddressController,
+  customerVerifyAddressController,
 } = require("../controllers/customer.controller");
 const {
   USER_ROLES,
@@ -34,6 +36,8 @@ const {
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
   customerUpdateRequestValidator,
+  customerAutocompleteAddressValidator,
+  customerVerifyAddressValidator,
 } = require("../validators/customer.validators");
 
 function createCustomerRouter() {
@@ -53,6 +57,18 @@ function createCustomerRouter() {
   router.get(
     "/requests",
     customerListRequestsController,
+  );
+  router.get(
+    "/address/autocomplete",
+    customerAutocompleteAddressValidator,
+    validateRequest,
+    customerAutocompleteAddressController,
+  );
+  router.post(
+    "/address/verify",
+    customerVerifyAddressValidator,
+    validateRequest,
+    customerVerifyAddressController,
   );
   router.patch(
     "/requests/:requestId",

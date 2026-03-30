@@ -14,6 +14,7 @@ const {
   staffPostRequestMessageController,
   staffReviewPaymentProofController,
   staffRegisterController,
+  staffUploadRequestAttachmentController,
   staffUpdateAvailabilityController,
   staffUpdateRequestAiControlController,
   staffUpdateRequestStatusController,
@@ -28,6 +29,9 @@ const {
 const {
   USER_ROLES,
 } = require("../constants/app.constants");
+const {
+  requestAttachmentUploadMiddleware,
+} = require("../middleware/upload.middleware");
 const {
   requireAuth,
   requireRoles,
@@ -45,6 +49,7 @@ const {
   staffReviewPaymentProofValidator,
   staffRegisterValidator,
   staffRequestFiltersValidator,
+  staffUploadRequestAttachmentValidator,
   staffUpdateAvailabilityValidator,
   staffUpdateRequestAiControlValidator,
   staffUpdateRequestStatusValidator,
@@ -107,6 +112,13 @@ function createStaffRouter() {
     staffPostRequestMessageValidator,
     validateRequest,
     staffPostRequestMessageController,
+  );
+  router.post(
+    "/requests/:requestId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    staffUploadRequestAttachmentValidator,
+    validateRequest,
+    staffUploadRequestAttachmentController,
   );
   router.patch(
     "/requests/:requestId/ai-control",

@@ -7,6 +7,7 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const { emitInternalChatThreadUpdated } = require('../realtime/socket');
 const internalChatService = require('../services/internal-chat.service');
 
 const listInternalChatsController = asyncHandler(async (req, res) => {
@@ -42,6 +43,7 @@ const createDirectInternalChatController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -64,6 +66,7 @@ const createGroupInternalChatController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -85,6 +88,7 @@ const postInternalChatMessageController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -105,6 +109,7 @@ const markInternalChatReadController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,

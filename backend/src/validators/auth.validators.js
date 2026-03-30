@@ -14,9 +14,25 @@ const customerRegisterValidator = [
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
   body('email').trim().isEmail().withMessage('A valid email is required'),
   optionalPhoneValidator,
+  body('verificationToken')
+    .trim()
+    .notEmpty()
+    .withMessage('A verified registration token is required'),
   body('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters long'),
+];
+
+const customerRegistrationCodeRequestValidator = [
+  body('email').trim().isEmail().withMessage('A valid email is required'),
+];
+
+const customerRegistrationCodeVerifyValidator = [
+  body('email').trim().isEmail().withMessage('A valid email is required'),
+  body('code')
+    .trim()
+    .matches(/^\d{6}$/)
+    .withMessage('A valid 6-digit verification code is required'),
 ];
 
 const loginValidator = [
@@ -32,6 +48,8 @@ const demoAccountsValidator = [
 
 module.exports = {
   customerRegisterValidator,
+  customerRegistrationCodeRequestValidator,
+  customerRegistrationCodeVerifyValidator,
   demoAccountsValidator,
   loginValidator,
 };

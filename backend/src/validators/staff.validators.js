@@ -58,6 +58,15 @@ const staffUpdateRequestAiControlValidator = [
   body('enabled').isBoolean().withMessage('Enabled must be true or false'),
 ];
 
+const staffUploadRequestAttachmentValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  body('caption')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Attachment caption must be 500 characters or fewer'),
+];
+
 const staffCreateRequestInvoiceValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
   body('amount')
@@ -103,6 +112,7 @@ module.exports = {
   staffRequestFiltersValidator,
   staffReviewPaymentProofValidator,
   staffUpdateAvailabilityValidator,
+  staffUploadRequestAttachmentValidator,
   staffUpdateRequestAiControlValidator,
   staffUpdateRequestStatusValidator,
 };

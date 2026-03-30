@@ -4,7 +4,7 @@
  * HOW: Validate service type, location fields, and free-text request context at the controller boundary.
  */
 
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 
 const customerRequestFieldsValidator = [
   body('serviceType').trim().notEmpty().withMessage('Service type is required'),
@@ -20,6 +20,25 @@ const customerRequestFieldsValidator = [
 ];
 
 const customerCreateRequestValidator = [...customerRequestFieldsValidator];
+
+const customerVerifyAddressValidator = [
+  body('addressLine1')
+    .trim()
+    .isLength({ min: 5, max: 240 })
+    .withMessage('Address line must be between 5 and 240 characters'),
+  body('placeId')
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 255 })
+    .withMessage('Place ID must be between 1 and 255 characters'),
+];
+
+const customerAutocompleteAddressValidator = [
+  query('input')
+    .trim()
+    .isLength({ min: 3, max: 240 })
+    .withMessage('Address search input must be between 3 and 240 characters'),
+];
 
 const customerUpdateRequestValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
@@ -53,9 +72,11 @@ const customerUploadRequestAttachmentValidator = [
 ];
 
 module.exports = {
+  customerAutocompleteAddressValidator,
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
   customerUpdateRequestValidator,
+  customerVerifyAddressValidator,
 };

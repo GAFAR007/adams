@@ -38,6 +38,10 @@ const {
   syncOnlineInvoicePaymentIfNeeded,
 } = require('../utils/request-payment-status');
 const { serializeServiceRequest } = require('../utils/serializers');
+const {
+  storePaymentProofFile,
+  storeRequestAttachmentFile,
+} = require('./file-storage.service');
 
 async function loadQueueCompanyProfile() {
   // WHY: Queue-assistant copy should reuse the live company profile when it exists, but request handling must still work without it.
@@ -476,9 +480,10 @@ async function uploadPaymentProof(customerUserId, requestId, file, note, logCont
     });
   }
 
-  attachProofToInvoice(request.invoice, file, note);
+  const storedProof = await storePaymentProofFile(file, logContext);
+  attachProofToInvoice(request.invoice, storedProof, note);
   const proofAttachment = buildRequestMessageAttachment(
-    file,
+    storedProof,
     request.invoice.proof?.relativeUrl,
   );
   const trimmedNote = typeof note === 'string' ? note.trim() : '';
@@ -487,7 +492,7 @@ async function uploadPaymentProof(customerUserId, requestId, file, note, logCont
       customerId: customerUserId,
       customerName: request.contactSnapshot.fullName,
       actionType: REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPLOAD_PAYMENT_PROOF,
-      text: trimmedNote.isEmpty
+      text: trimmedNote.length === 0
           ? `Uploaded payment proof for quotation ${request.invoice.invoiceNumber}.`
           : `Uploaded payment proof for quotation ${request.invoice.invoiceNumber}. Note: ${trimmedNote}`,
       attachment: proofAttachment,
@@ -568,16 +573,16 @@ async function uploadRequestAttachment(
   }
 
   const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
-  const relativeUrl = `/uploads/request-attachments/${file.filename}`;
+  const storedAttachment = await storeRequestAttachmentFile(file, logContext);
   request.messages.push(
     buildCustomerMessage({
       customerId: customerUserId,
       customerName: request.contactSnapshot.fullName,
       text:
         trimmedCaption.length === 0
-          ? `Shared a file: ${file.originalname || 'attachment'}`
+          ? `Shared a file: ${storedAttachment.originalName || 'attachment'}`
           : trimmedCaption,
-      attachment: buildRequestMessageAttachment(file, relativeUrl),
+      attachment: buildRequestMessageAttachment(storedAttachment),
     }),
   );
 
@@ -588,7 +593,7 @@ async function uploadRequestAttachment(
         buildQueueAttachmentAiText({
           request,
           companyProfile,
-          attachmentName: file.originalname,
+          attachmentName: storedAttachment.originalName,
         }),
       ),
     );

@@ -4,7 +4,7 @@
  * HOW: Persist a hashed token per session together with expiry, revocation, and client metadata.
  */
 
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const refreshSessionSchema = new mongoose.Schema(
   {
@@ -15,7 +15,7 @@ const refreshSessionSchema = new mongoose.Schema(
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
       index: true,
     },
@@ -25,11 +25,11 @@ const refreshSessionSchema = new mongoose.Schema(
     },
     ipAddress: {
       type: String,
-      default: '',
+      default: "",
     },
     userAgent: {
       type: String,
-      default: '',
+      default: "",
     },
     expiresAt: {
       type: Date,
@@ -47,8 +47,14 @@ const refreshSessionSchema = new mongoose.Schema(
 );
 
 // The compound user/revocation index keeps refresh-session validation and cleanup queries efficient.
-refreshSessionSchema.index({ user: 1, revokedAt: 1 });
+refreshSessionSchema.index({
+  user: 1,
+  revokedAt: 1,
+});
 
-const RefreshSession = mongoose.model('RefreshSession', refreshSessionSchema);
+const RefreshSession = mongoose.model(
+  "RefreshSession",
+  refreshSessionSchema,
+);
 
 module.exports = { RefreshSession };
