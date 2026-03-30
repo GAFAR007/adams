@@ -10,6 +10,7 @@ const {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerReplaceRequestAttachmentController,
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,
   customerUpdateRequestController,
@@ -35,6 +36,7 @@ const {
   customerPostRequestMessageValidator,
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
+  customerReplaceRequestAttachmentValidator,
   customerUpdateRequestValidator,
   customerAutocompleteAddressValidator,
   customerVerifyAddressValidator,
@@ -89,6 +91,13 @@ function createCustomerRouter() {
     customerUploadRequestAttachmentValidator,
     validateRequest,
     customerUploadRequestAttachmentController,
+  );
+  router.post(
+    "/requests/:requestId/messages/:messageId/attachment/replace",
+    requestAttachmentUploadMiddleware,
+    customerReplaceRequestAttachmentValidator,
+    validateRequest,
+    customerReplaceRequestAttachmentController,
   );
   router.post(
     "/requests/:requestId/messages",

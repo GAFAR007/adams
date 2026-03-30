@@ -183,6 +183,27 @@ class CustomerRepository {
     );
   }
 
+  Future<void> replaceRequestAttachment({
+    required String requestId,
+    required String messageId,
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+
+    await _client.postFormData(
+      '/customer/requests/$requestId/messages/$messageId/attachment/replace',
+      createData: () => FormData.fromMap(<String, dynamic>{
+        'attachment': MultipartFile.fromBytes(
+          bytes,
+          filename: fileName,
+          contentType: DioMediaType.parse(resolvedMimeType),
+        ),
+      }),
+    );
+  }
+
   Future<void> uploadPaymentProof({
     required String requestId,
     required List<int> bytes,

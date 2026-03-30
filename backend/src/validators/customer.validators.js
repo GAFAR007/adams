@@ -71,10 +71,16 @@ const customerUploadRequestAttachmentValidator = [
     .withMessage('Attachment caption must be 500 characters or fewer'),
 ];
 
+const customerReplaceRequestAttachmentValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+  param('messageId').isMongoId().withMessage('Message ID must be valid'),
+];
+
 module.exports = {
   customerAutocompleteAddressValidator,
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
+  customerReplaceRequestAttachmentValidator,
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
   customerUpdateRequestValidator,

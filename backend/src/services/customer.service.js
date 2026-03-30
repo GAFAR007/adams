@@ -10,6 +10,7 @@ const {
   PAYMENT_METHODS,
   PAYMENT_REQUEST_STATUSES,
   REQUEST_MESSAGE_ACTIONS,
+  REQUEST_MESSAGE_SENDERS,
   REQUEST_SOURCES,
   REQUEST_STATUSES,
   STAFF_AVAILABILITIES,
@@ -615,10 +616,152 @@ async function uploadRequestAttachment(
   };
 }
 
+async function replaceRequestAttachment(
+  customerUserId,
+  requestId,
+  messageId,
+  file,
+  logContext,
+) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'CustomerReplaceRequestAttachment',
+    intent: 'Replace an existing customer-owned chat attachment on an owned request thread',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'CustomerReplaceRequestAttachment',
+    intent: 'Load the owned request thread before replacing a customer attachment message',
+  });
+
+  const request = await loadOwnedRequest(customerUserId, requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Request thread not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh your request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Closed requests cannot accept attachment updates',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_REQUEST_CLOSED',
+      resolutionHint: 'Open a new request if you need to continue with another job',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!file) {
+    throw new AppError({
+      message: 'Attachment file is required',
+      statusCode: 400,
+      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
+      errorCode: 'CUSTOMER_ATTACHMENT_FILE_REQUIRED',
+      resolutionHint: 'Choose a file and try again',
+      step: LOG_STEPS.VALIDATION_FAIL,
+    });
+  }
+
+  const message = request.messages.id(messageId);
+
+  if (!message) {
+    throw new AppError({
+      message: 'Attachment message not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_MESSAGE_NOT_FOUND',
+      resolutionHint: 'Refresh the thread and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (
+    message.senderType !== REQUEST_MESSAGE_SENDERS.CUSTOMER
+  ) {
+    throw new AppError({
+      message: 'Only customer attachment messages can be updated',
+      statusCode: 403,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_MESSAGE_FORBIDDEN',
+      resolutionHint: 'Choose one of your own attachment messages and try again',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (String(message.senderId || '') !== String(customerUserId)) {
+    throw new AppError({
+      message: 'Only your own attachment messages can be updated',
+      statusCode: 403,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_MESSAGE_FORBIDDEN',
+      resolutionHint: 'Choose one of your own attachment messages and try again',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (!message.attachment) {
+    throw new AppError({
+      message: 'This message does not contain a replaceable attachment',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_MESSAGE_EMPTY',
+      resolutionHint: 'Choose a message that already contains an uploaded file',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (message.actionType === REQUEST_MESSAGE_ACTIONS.CUSTOMER_UPLOAD_PAYMENT_PROOF) {
+    throw new AppError({
+      message: 'Payment proof files should be updated from the quotation card',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'CUSTOMER_ATTACHMENT_PAYMENT_PROOF_MANAGED_SEPARATELY',
+      resolutionHint: 'Use the quotation card to upload a new payment proof',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  const storedAttachment = await storeRequestAttachmentFile(file, logContext);
+  message.attachment = buildRequestMessageAttachment(storedAttachment);
+
+  if (String(message.text || '').trim().startsWith('Shared a file:')) {
+    message.text = `Shared a file: ${storedAttachment.originalName || 'attachment'}`;
+  }
+
+  request.markModified('messages');
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'CustomerReplaceRequestAttachment',
+    intent: 'Confirm the customer attachment message now points to the replacement file',
+  });
+
+  return {
+    message: 'Attachment updated successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
 module.exports = {
   createRequest,
   listRequests,
   postRequestMessage,
+  replaceRequestAttachment,
   uploadRequestAttachment,
   uploadPaymentProof,
   updateRequest,

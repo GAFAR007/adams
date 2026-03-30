@@ -141,6 +141,32 @@ const customerUploadRequestAttachmentController = asyncHandler(
   },
 );
 
+const customerReplaceRequestAttachmentController = asyncHandler(
+  async (req, res) => {
+    const logContext = buildRequestLog(req, {
+      layer: 'controller',
+      operation: 'CustomerReplaceRequestAttachment',
+      intent:
+          'Replace a customer chat attachment on an owned service-request message',
+    });
+
+    const result = await customerService.replaceRequestAttachment(
+      req.authUser.id,
+      req.params.requestId,
+      req.params.messageId,
+      req.file,
+      logContext,
+    );
+    res.status(200).json(result);
+    emitRequestUpdated(result.request);
+
+    logInfo({
+      ...logContext,
+      step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+    });
+  },
+);
+
 const customerVerifyAddressController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -188,6 +214,7 @@ module.exports = {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerReplaceRequestAttachmentController,
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,
   customerUpdateRequestController,

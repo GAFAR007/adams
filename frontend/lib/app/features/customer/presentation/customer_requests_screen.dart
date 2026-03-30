@@ -61,6 +61,7 @@ class _CustomerRequestsScreenState
       <String, DateTime>{};
   final Set<String> _submittingMessageIds = <String>{};
   final Set<String> _uploadingAttachmentIds = <String>{};
+  final Set<String> _replacingAttachmentMessageIds = <String>{};
   final Set<String> _uploadingPaymentProofIds = <String>{};
   final Map<String, String> _dismissedInvoiceCardKeysByRequestId =
       <String, String>{};
@@ -479,7 +480,37 @@ class _CustomerRequestsScreenState
   ) {
     final invoice = request.invoice;
     if (invoice == null || !message.isCustomerUploadPaymentProof) {
-      return null;
+      if (request.status == 'closed' ||
+          !message.isCustomer ||
+          message.attachment == null ||
+          message.isCustomerUploadPaymentProof) {
+        return null;
+      }
+
+      final isReplacing = _replacingAttachmentMessageIds.contains(message.id);
+
+      return OutlinedButton.icon(
+        onPressed: isReplacing
+            ? null
+            : () => _replaceRequestAttachment(request, message),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.white.withValues(alpha: 0.08),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        icon: isReplacing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.upload_file_outlined, size: 18),
+        label: Text(isReplacing ? 'Updating file...' : 'Replace file'),
+      );
     }
 
     return OutlinedButton.icon(
@@ -762,6 +793,59 @@ class _CustomerRequestsScreenState
     } finally {
       if (mounted) {
         setState(() => _uploadingAttachmentIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _replaceRequestAttachment(
+    ServiceRequestModel request,
+    RequestMessageModel message,
+  ) async {
+    if (request.status == 'closed' || message.attachment == null) {
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    final pickedFile = await pickRequestAttachmentFile();
+    if (pickedFile == null) {
+      return;
+    }
+
+    setState(() => _replacingAttachmentMessageIds.add(message.id));
+
+    try {
+      await ref
+          .read(customerRepositoryProvider)
+          .replaceRequestAttachment(
+            requestId: request.id,
+            messageId: message.id,
+            bytes: pickedFile.bytes,
+            fileName: pickedFile.name,
+            mimeType: pickedFile.mimeType,
+          );
+      ref.invalidate(customerRequestsProvider);
+      await ref.read(customerRequestsProvider.future);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('File updated in chat')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _replacingAttachmentMessageIds.remove(message.id));
       }
     }
   }
