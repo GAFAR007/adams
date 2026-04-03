@@ -22,6 +22,15 @@ Map<String, dynamic> _compactJson(Map<String, dynamic> values) {
   );
 }
 
+String? _normalizedOptionalString(String? value) {
+  if (value == null) {
+    return null;
+  }
+
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 final staffRepositoryProvider = Provider<StaffRepository>((ref) {
   return StaffRepository(ref.read(apiClientProvider));
 });
@@ -125,13 +134,21 @@ class StaffRepository {
     );
   }
 
-  Future<void> updateRequestStatus({
+  Future<ServiceRequestModel> updateRequestStatus({
     required String requestId,
     required String status,
+    String? password,
   }) async {
-    await _client.patchJson(
+    final response = await _client.patchJson(
       '/staff/requests/$requestId/status',
-      data: <String, dynamic>{'status': status},
+      data: _compactJson(<String, dynamic>{
+        'status': status,
+        'password': password,
+      }),
+    );
+
+    return ServiceRequestModel.fromJson(
+      response['request'] as Map<String, dynamic>? ?? const <String, dynamic>{},
     );
   }
 
@@ -158,16 +175,16 @@ class StaffRepository {
     final response = await _client.postJson(
       '/staff/requests/$requestId/estimations',
       data: _compactJson(<String, dynamic>{
-        'assessmentType': assessmentType,
-        'assessmentStatus': assessmentStatus,
-        'stage': stage,
-        'siteReviewDate': siteReviewDate,
-        'siteReviewStartTime': siteReviewStartTime,
-        'siteReviewEndTime': siteReviewEndTime,
+        'assessmentType': _normalizedOptionalString(assessmentType),
+        'assessmentStatus': _normalizedOptionalString(assessmentStatus),
+        'stage': _normalizedOptionalString(stage),
+        'siteReviewDate': _normalizedOptionalString(siteReviewDate),
+        'siteReviewStartTime': _normalizedOptionalString(siteReviewStartTime),
+        'siteReviewEndTime': _normalizedOptionalString(siteReviewEndTime),
         'siteReviewCost': siteReviewCost,
         'siteReviewNotes': siteReviewNotes,
-        'estimatedStartDate': estimatedStartDate,
-        'estimatedEndDate': estimatedEndDate,
+        'estimatedStartDate': _normalizedOptionalString(estimatedStartDate),
+        'estimatedEndDate': _normalizedOptionalString(estimatedEndDate),
         'cost': cost,
         'estimatedHoursPerDay': estimatedHoursPerDay,
         'estimatedHours': estimatedHours,

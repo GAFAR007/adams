@@ -52,6 +52,11 @@ const staffAttendQueueRequestValidator = [
 const staffUpdateRequestStatusValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
   body('status').trim().notEmpty().withMessage('Status is required'),
+  body('password')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Password must be 200 characters or fewer'),
 ];
 
 const staffSubmitRequestEstimationValidator = [

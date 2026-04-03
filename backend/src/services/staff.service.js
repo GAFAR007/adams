@@ -72,7 +72,6 @@ const {
 const {
   calculateEstimatedHoursFromDailySchedule,
   calculateEstimatedDays,
-  buildRequestCalendarWindow,
   getSelectedRequestEstimation,
   isCompleteFinalRequestEstimation,
   isSiteReviewBookingReady,
@@ -172,6 +171,53 @@ function resolveEstimationAssignmentType(staffUser) {
 
 function isCustomerCareStaff(staffUser) {
   return resolveStaffOperationalType(staffUser) === STAFF_TYPES.CUSTOMER_CARE;
+}
+
+async function assertStaffPasswordMatches(staffUserId, password) {
+  const rawPassword = typeof password === 'string' ? password : '';
+  if (!rawPassword.trim()) {
+    throw new AppError({
+      message: 'Password is required to complete work',
+      statusCode: 401,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_COMPLETE_WORK_PASSWORD_REQUIRED',
+      resolutionHint: 'Enter your own staff password before marking the work completed',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  const staffWithPassword = await User.findOne({
+    _id: staffUserId,
+    role: USER_ROLES.STAFF,
+    status: USER_STATUSES.ACTIVE,
+  }).select('+passwordHash');
+
+  if (!staffWithPassword?.passwordHash) {
+    throw new AppError({
+      message: 'Staff account not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_COMPLETE_WORK_USER_NOT_FOUND',
+      resolutionHint: 'Log in again and try once more',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  const passwordMatches = await bcrypt.compare(
+    rawPassword,
+    staffWithPassword.passwordHash,
+  );
+
+  if (!passwordMatches) {
+    throw new AppError({
+      message: 'Password is incorrect',
+      statusCode: 401,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'STAFF_COMPLETE_WORK_PASSWORD_INVALID',
+      resolutionHint: 'Enter the correct password for the signed-in technician or contractor account',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
 }
 
 function isSiteReviewStillPending(assessmentType, assessmentStatus) {
@@ -666,10 +712,6 @@ async function clockAssignedRequestWork(
   const actionLabel = isSiteReviewClock
     ? 'site review'
     : 'scheduled work';
-  const calendarWindow = buildRequestCalendarWindow(request);
-  const scheduledEndDate = normalizeDateValue(calendarWindow?.endDate);
-  const isLastScheduledJobDay =
-    !scheduledEndDate || scheduledEndDate <= endOfToday();
 
   if (action === 'clock_in') {
     if (activeWorkLog) {
@@ -718,11 +760,6 @@ async function clockAssignedRequestWork(
     activeWorkLog.stoppedAt = now;
     if (trimmedNote) {
       activeWorkLog.note = trimmedNote;
-    }
-    if (!isSiteReviewClock && isLastScheduledJobDay) {
-      // WHY: On the final scheduled work day, clock-out should close the execution phase and mark the job as completed.
-      request.status = REQUEST_STATUSES.WORK_DONE;
-      request.finishedAt = request.finishedAt || now;
     }
     request.messages.push(
       buildSystemMessage(
@@ -2325,7 +2362,13 @@ async function unlockAssignedRequestInvoiceProofUpload(
   };
 }
 
-async function updateAssignedRequestStatus(staffUserId, requestId, status, logContext) {
+async function updateAssignedRequestStatus(
+  staffUserId,
+  requestId,
+  status,
+  password,
+  logContext,
+) {
   logInfo({
     ...logContext,
     step: LOG_STEPS.SERVICE_START,
@@ -2390,6 +2433,61 @@ async function updateAssignedRequestStatus(staffUserId, requestId, status, logCo
     });
   }
 
+  if (status === REQUEST_STATUSES.WORK_DONE) {
+    if (
+      request.status !== REQUEST_STATUSES.PENDING_START &&
+      request.status !== REQUEST_STATUSES.PROJECT_STARTED
+    ) {
+      throw new AppError({
+        message: 'Work can only be completed after the job has started',
+        statusCode: 409,
+        classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+        errorCode: 'STAFF_COMPLETE_WORK_INVALID_STAGE',
+        resolutionHint: 'Clock in to start the job, then clock out before marking it completed',
+        step: LOG_STEPS.SERVICE_FAIL,
+      });
+    }
+
+    const activeMainJobWorkLog = (Array.isArray(request.workLogs) ? request.workLogs : []).find(
+      (workLog) =>
+        workLog?.workType === REQUEST_WORK_LOG_TYPES.MAIN_JOB &&
+        !workLog?.stoppedAt,
+    );
+
+    if (activeMainJobWorkLog) {
+      throw new AppError({
+        message: 'Clock out the active work session before completing the job',
+        statusCode: 409,
+        classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+        errorCode: 'STAFF_COMPLETE_WORK_ACTIVE_LOG_PRESENT',
+        resolutionHint: 'Use clock out work first, then confirm completion with your password',
+        step: LOG_STEPS.SERVICE_FAIL,
+      });
+    }
+
+    const hasStartedMainJob =
+      Boolean(request.projectStartedAt) ||
+      request.status === REQUEST_STATUSES.PROJECT_STARTED ||
+      (Array.isArray(request.workLogs) ? request.workLogs : []).some(
+        (workLog) =>
+          workLog?.workType === REQUEST_WORK_LOG_TYPES.MAIN_JOB &&
+          workLog?.startedAt,
+      );
+
+    if (!hasStartedMainJob) {
+      throw new AppError({
+        message: 'Work cannot be completed before the job is clocked in',
+        statusCode: 409,
+        classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+        errorCode: 'STAFF_COMPLETE_WORK_NOT_STARTED',
+        resolutionHint: 'Clock in to begin the job before marking it completed',
+        step: LOG_STEPS.SERVICE_FAIL,
+      });
+    }
+
+    await assertStaffPasswordMatches(staffUserId, password);
+  }
+
   request.status = status;
   request.attendedAt = request.attendedAt || new Date();
   if (status === REQUEST_STATUSES.PROJECT_STARTED) {
@@ -2403,7 +2501,11 @@ async function updateAssignedRequestStatus(staffUserId, requestId, status, logCo
   }
   request.closedAt = status === REQUEST_STATUSES.CLOSED ? new Date() : null;
   request.messages.push(
-    buildSystemMessage(`Request status changed to ${status.replace(/_/g, ' ')}.`),
+    buildSystemMessage(
+      status === REQUEST_STATUSES.WORK_DONE
+        ? 'Work completed.'
+        : `Request status changed to ${status.replace(/_/g, ' ')}.`,
+    ),
   );
   await request.save();
 

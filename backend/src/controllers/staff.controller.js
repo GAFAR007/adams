@@ -180,6 +180,7 @@ const staffUpdateRequestStatusController = asyncHandler(async (req, res) => {
     req.authUser.id,
     req.params.requestId,
     req.body.status,
+    req.body.password || '',
     logContext,
   );
   res.status(200).json(result);

@@ -78,6 +78,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   final Set<String> _uploadingAttachmentIds = <String>{};
   final Set<String> _refiningMessageIds = <String>{};
   final Set<String> _sendingInvoiceIds = <String>{};
+  final Set<String> _completingWorkRequestIds = <String>{};
   final Set<String> _reviewingPaymentProofIds = <String>{};
   final Set<String> _savingStatusIds = <String>{};
   final Set<String> _clockingRequestIds = <String>{};
@@ -282,6 +283,28 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     return _requestOccursToday(request);
   }
 
+  bool _canCurrentStaffCompleteRequestWork(ServiceRequestModel request) {
+    if (!_canCurrentStaffClockRequest(request) || request.isSiteReviewPending) {
+      return false;
+    }
+
+    if (request.status == 'work_done' || request.status == 'closed') {
+      return false;
+    }
+
+    if (_activeCurrentStaffWorkLog(request) != null) {
+      return false;
+    }
+
+    return request.projectStartedAt != null ||
+        request.status == 'project_started' ||
+        request.workLogs.any(
+          (log) =>
+              log.workType == requestWorkLogTypeMainJob &&
+              log.startedAt != null,
+        );
+  }
+
   RequestWorkLogModel? _activeCurrentStaffWorkLog(ServiceRequestModel request) {
     final userId = _currentStaffUserId;
     final matchingLogs =
@@ -399,6 +422,160 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _clockingRequestIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<String?> _promptForWorkCompletionPassword() async {
+    final passwordController = TextEditingController();
+    var obscureText = true;
+    String? errorText;
+
+    final password = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return AlertDialog(
+              title: Text(_t(en: 'Complete work', de: 'Arbeit abschließen')),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      _t(
+                        en: 'Enter your staff password before marking this job completed.',
+                        de: 'Geben Sie Ihr Mitarbeiterpasswort ein, bevor Sie diesen Job als erledigt markieren.',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: obscureText,
+                      autofocus: true,
+                      onChanged: (_) {
+                        if (errorText != null) {
+                          setDialogState(() => errorText = null);
+                        }
+                      },
+                      onSubmitted: (_) {
+                        final trimmedPassword = passwordController.text.trim();
+                        if (trimmedPassword.isEmpty) {
+                          setDialogState(
+                            () => errorText = _t(
+                              en: 'Password is required.',
+                              de: 'Passwort ist erforderlich.',
+                            ),
+                          );
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(trimmedPassword);
+                      },
+                      decoration: InputDecoration(
+                        labelText: _t(en: 'Password', de: 'Passwort'),
+                        errorText: errorText,
+                        suffixIcon: IconButton(
+                          onPressed: () {
+                            setDialogState(() => obscureText = !obscureText);
+                          },
+                          icon: Icon(
+                            obscureText
+                                ? Icons.visibility_off_rounded
+                                : Icons.visibility_rounded,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(_t(en: 'Cancel', de: 'Abbrechen')),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final trimmedPassword = passwordController.text.trim();
+                    if (trimmedPassword.isEmpty) {
+                      setDialogState(
+                        () => errorText = _t(
+                          en: 'Password is required.',
+                          de: 'Passwort ist erforderlich.',
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop(trimmedPassword);
+                  },
+                  child: Text(
+                    _t(en: 'Complete work', de: 'Arbeit abschließen'),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    passwordController.dispose();
+    return password;
+  }
+
+  Future<ServiceRequestModel?> _completeRequestWork(
+    ServiceRequestModel request,
+  ) async {
+    final password = await _promptForWorkCompletionPassword();
+    if (password == null || password.isEmpty) {
+      return null;
+    }
+
+    setState(() => _completingWorkRequestIds.add(request.id));
+
+    try {
+      final updatedRequest = await ref
+          .read(staffRepositoryProvider)
+          .updateRequestStatus(
+            requestId: request.id,
+            status: 'work_done',
+            password: password,
+          );
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return updatedRequest;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Work completed successfully.',
+              de: 'Arbeit erfolgreich abgeschlossen.',
+            ),
+          ),
+        ),
+      );
+
+      return updatedRequest;
+    } catch (error) {
+      if (!mounted) {
+        return null;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _completingWorkRequestIds.remove(request.id));
       }
     }
   }
@@ -1859,9 +2036,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     );
   }
 
-  Future<void> _updateStatus({
+  Future<ServiceRequestModel?> _updateStatus({
     required ServiceRequestModel request,
     required String status,
+    String? password,
   }) async {
     setState(() => _savingStatusIds.add(request.id));
     debugPrint(
@@ -1869,21 +2047,38 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     );
 
     try {
-      await ref
+      final updatedRequest = await ref
           .read(staffRepositoryProvider)
-          .updateRequestStatus(requestId: request.id, status: status);
+          .updateRequestStatus(
+            requestId: request.id,
+            status: status,
+            password: password,
+          );
       ref.invalidate(staffDashboardProvider);
 
       if (!mounted) {
-        return;
+        return updatedRequest;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Request status updated')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'work_done'
+                ? _t(
+                    en: 'Work completed successfully.',
+                    de: 'Arbeit erfolgreich abgeschlossen.',
+                  )
+                : _t(
+                    en: 'Request status updated',
+                    de: 'Anfragestatus aktualisiert',
+                  ),
+          ),
+        ),
+      );
+      return updatedRequest;
     } catch (error) {
       if (!mounted) {
-        return;
+        return null;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1891,6 +2086,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
           content: Text(error.toString().replaceFirst('Exception: ', '')),
         ),
       );
+      return null;
     } finally {
       if (mounted) {
         setState(() => _savingStatusIds.remove(request.id));
@@ -3130,6 +3326,21 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                               );
                             }
                           },
+                          showCompleteAction:
+                              _canCurrentStaffCompleteRequestWork(sheetRequest),
+                          isCompleting: _completingWorkRequestIds.contains(
+                            sheetRequest.id,
+                          ),
+                          onCompleteAction: () async {
+                            final updatedRequest = await _completeRequestWork(
+                              sheetRequest,
+                            );
+                            if (updatedRequest != null) {
+                              setModalState(
+                                () => sheetRequest = updatedRequest,
+                              );
+                            }
+                          },
                         ),
                         if (sheetComposerEnabled) ...<Widget>[
                           const SizedBox(height: 16),
@@ -3188,6 +3399,21 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                                       : 'clock_out';
                                   Navigator.of(modalContext).pop();
                                   await _clockRequestWork(sheetRequest, action);
+                                },
+                                canCompleteWork:
+                                    _canCurrentStaffCompleteRequestWork(
+                                      sheetRequest,
+                                    ),
+                                isCompletingWork: _completingWorkRequestIds
+                                    .contains(sheetRequest.id),
+                                onCompleteWork: () async {
+                                  final updatedRequest =
+                                      await _completeRequestWork(sheetRequest);
+                                  if (updatedRequest != null) {
+                                    setModalState(
+                                      () => sheetRequest = updatedRequest,
+                                    );
+                                  }
                                 },
                                 onBookSiteReview: () {
                                   Navigator.of(modalContext).pop();
@@ -3407,11 +3633,22 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                         child: FilledButton.tonal(
                           onPressed: canSaveStatus
                               ? () async {
-                                  await _updateStatus(
+                                  String? password;
+                                  if (localSelectedStatus == 'work_done') {
+                                    password =
+                                        await _promptForWorkCompletionPassword();
+                                    if (password == null || password.isEmpty) {
+                                      return;
+                                    }
+                                  }
+
+                                  final updatedRequest = await _updateStatus(
                                     request: request,
                                     status: localSelectedStatus!,
+                                    password: password,
                                   );
-                                  if (modalContext.mounted) {
+                                  if (updatedRequest != null &&
+                                      modalContext.mounted) {
                                     Navigator.of(modalContext).pop();
                                   }
                                 }
@@ -3441,6 +3678,9 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     bool showClockAction = false,
     bool isClocking = false,
     VoidCallback? onClockAction,
+    bool showCompleteAction = false,
+    bool isCompleting = false,
+    VoidCallback? onCompleteAction,
   }) {
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -3710,6 +3950,24 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                           : _t(en: 'Clock out', de: 'Ausstempeln'),
                     ),
                   ),
+                if (showCompleteAction)
+                  FilledButton.icon(
+                    onPressed: isCompleting ? null : onCompleteAction,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.pine,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: Icon(
+                      isCompleting
+                          ? Icons.more_horiz_rounded
+                          : Icons.task_alt_rounded,
+                    ),
+                    label: Text(
+                      isCompleting
+                          ? _t(en: 'Saving...', de: 'Speichert...')
+                          : _t(en: 'Complete work', de: 'Arbeit abschließen'),
+                    ),
+                  ),
               ],
             ),
             if (showClockAction) ...<Widget>[
@@ -3744,6 +4002,8 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   Widget _buildConversationClockStrip(ServiceRequestModel request) {
     final hasActiveClockLog = _activeCurrentStaffWorkLog(request) != null;
     final isClockingRequest = _clockingRequestIds.contains(request.id);
+    final canCompleteWork = _canCurrentStaffCompleteRequestWork(request);
+    final isCompletingWork = _completingWorkRequestIds.contains(request.id);
     final isSiteReviewClockAction = request.isSiteReviewPending;
     final actionLabel = isSiteReviewClockAction
         ? hasActiveClockLog
@@ -3789,32 +4049,66 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            FilledButton.icon(
-              onPressed: isClockingRequest
-                  ? null
-                  : () => _clockRequestWork(
-                      request,
-                      hasActiveClockLog ? 'clock_out' : 'clock_in',
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: isClockingRequest
+                      ? null
+                      : () => _clockRequestWork(
+                          request,
+                          hasActiveClockLog ? 'clock_out' : 'clock_in',
+                        ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.cobalt,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
                     ),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.cobalt,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
+                    minimumSize: const Size(0, 38),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: Icon(
+                    isClockingRequest
+                        ? Icons.more_horiz_rounded
+                        : hasActiveClockLog
+                        ? Icons.logout_rounded
+                        : Icons.login_rounded,
+                    size: 18,
+                  ),
+                  label: Text(actionLabel),
                 ),
-                minimumSize: const Size(0, 38),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: Icon(
-                isClockingRequest
-                    ? Icons.more_horiz_rounded
-                    : hasActiveClockLog
-                    ? Icons.logout_rounded
-                    : Icons.login_rounded,
-                size: 18,
-              ),
-              label: Text(actionLabel),
+                if (canCompleteWork)
+                  FilledButton.icon(
+                    onPressed: isCompletingWork
+                        ? null
+                        : () => _completeRequestWork(request),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.pine,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      minimumSize: const Size(0, 38),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Icon(
+                      isCompletingWork
+                          ? Icons.more_horiz_rounded
+                          : Icons.task_alt_rounded,
+                      size: 18,
+                    ),
+                    label: Text(
+                      isCompletingWork
+                          ? _t(en: 'Saving...', de: 'Speichert...')
+                          : _t(en: 'Complete work', de: 'Arbeit abschließen'),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -3967,9 +4261,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
                         return Column(
                           children: <Widget>[
-                            if (_canCurrentStaffClockRequest(
-                              request,
-                            )) ...<Widget>[
+                            if (_canCurrentStaffClockRequest(request) ||
+                                _canCurrentStaffCompleteRequestWork(
+                                  request,
+                                )) ...<Widget>[
                               _buildConversationClockStrip(request),
                               const SizedBox(height: 10),
                             ],
@@ -4484,6 +4779,9 @@ class _StaffChatActionTray extends ConsumerWidget {
     required this.isClockingRequest,
     required this.hasActiveClockLog,
     required this.onClockRequest,
+    required this.canCompleteWork,
+    required this.isCompletingWork,
+    required this.onCompleteWork,
     required this.onBookSiteReview,
     required this.onRunFinalEstimate,
     required this.onOpenPaymentProof,
@@ -4507,6 +4805,9 @@ class _StaffChatActionTray extends ConsumerWidget {
   final bool isClockingRequest;
   final bool hasActiveClockLog;
   final VoidCallback onClockRequest;
+  final bool canCompleteWork;
+  final bool isCompletingWork;
+  final VoidCallback onCompleteWork;
   final VoidCallback onBookSiteReview;
   final VoidCallback onRunFinalEstimate;
   final VoidCallback? onOpenPaymentProof;
@@ -4763,6 +5064,27 @@ class _StaffChatActionTray extends ConsumerWidget {
                             : language.pick(
                                 en: 'Clock in work',
                                 de: 'Arbeit einstempeln',
+                              ),
+                      ),
+                    ),
+                  if (canCompleteWork)
+                    FilledButton.icon(
+                      onPressed: isCompletingWork ? null : onCompleteWork,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.pine,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(
+                        isCompletingWork
+                            ? Icons.more_horiz_rounded
+                            : Icons.task_alt_rounded,
+                      ),
+                      label: Text(
+                        isCompletingWork
+                            ? language.pick(en: 'Saving...', de: 'Speichert...')
+                            : language.pick(
+                                en: 'Complete work',
+                                de: 'Arbeit abschließen',
                               ),
                       ),
                     ),

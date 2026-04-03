@@ -763,14 +763,14 @@ _WorkflowOwnership _resolveWorkflowOwnership(String currentStepKey) {
     case _workflowStepSiteReviewPaid:
     case _workflowStepJobScheduled:
     case _workflowStepJobInProgress:
-    case _workflowStepJobCompleted:
       return const _WorkflowOwnership(
         currentOwner: _WorkflowOwner.technicianOrContractor,
         nextOwner: _WorkflowOwner.admin,
       );
+    case _workflowStepJobCompleted:
     case _workflowStepDelivered:
       return const _WorkflowOwnership(
-        currentOwner: _WorkflowOwner.customerCare,
+        currentOwner: _WorkflowOwner.admin,
         nextOwner: null,
       );
     case _workflowStepRequestSubmitted:

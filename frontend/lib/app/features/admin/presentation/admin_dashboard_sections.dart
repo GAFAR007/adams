@@ -33,6 +33,10 @@ String _requestInitials(String name) {
 }
 
 String _adminStatusLabel(ServiceRequestModel request, AppLanguage language) {
+  if (request.status == 'closed') {
+    return _pick(language, en: 'delivered', de: 'Geliefert');
+  }
+
   if (request.isQuoteReadyForInternalReview ||
       request.isQuoteReadyForCustomerCare) {
     return requestStatusLabelFor(request.status, language: language);
@@ -532,11 +536,13 @@ class AdminRequestDetailPane extends StatelessWidget {
     required this.onAssign,
     required this.isAssigning,
     required this.onSendInvoice,
+    required this.onDeliverRequest,
     required this.onOpenPaymentProof,
     required this.onOpenReceipt,
     required this.onApprovePaymentProof,
     required this.onRejectPaymentProof,
     required this.isSendingInvoice,
+    required this.isDeliveringRequest,
     required this.isReviewingPaymentProof,
     required this.messageController,
     required this.isSendingMessage,
@@ -558,11 +564,13 @@ class AdminRequestDetailPane extends StatelessWidget {
   final VoidCallback? onAssign;
   final bool isAssigning;
   final VoidCallback? onSendInvoice;
+  final VoidCallback? onDeliverRequest;
   final VoidCallback? onOpenPaymentProof;
   final VoidCallback? onOpenReceipt;
   final VoidCallback? onApprovePaymentProof;
   final VoidCallback? onRejectPaymentProof;
   final bool isSendingInvoice;
+  final bool isDeliveringRequest;
   final bool isReviewingPaymentProof;
   final TextEditingController? messageController;
   final bool isSendingMessage;
@@ -702,6 +710,25 @@ class AdminRequestDetailPane extends StatelessWidget {
           }
         }
 
+        Future<void> openDelivery() async {
+          Navigator.of(modalContext).pop();
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          if (context.mounted && onDeliverRequest != null) {
+            onDeliverRequest!();
+          }
+        }
+
+        final canDeliver = onDeliverRequest != null;
+        final actionLabel = canDeliver
+            ? _pick(language, en: 'Deliver', de: 'Liefern')
+            : _pick(language, en: 'Internal review', de: 'Interne Prüfung');
+        final actionIcon = canDeliver
+            ? Icons.local_shipping_outlined
+            : Icons.receipt_long_rounded;
+        final actionCallback = canDeliver
+            ? (isDeliveringRequest ? null : openDelivery)
+            : (onSendInvoice == null || isSendingInvoice ? null : openBilling);
+
         return _AdminSheetCard(
           title:
               '${request.contactFullName} ${_pick(language, en: 'profile', de: 'Profil')}',
@@ -800,13 +827,21 @@ class AdminRequestDetailPane extends StatelessWidget {
                     onPressed: openAssignment,
                   ),
                   _AdminDetailActionButton(
-                    icon: Icons.receipt_long_rounded,
-                    label: _pick(
-                      language,
-                      en: 'Internal review',
-                      de: 'Interne Prüfung',
-                    ),
-                    onPressed: onSendInvoice == null ? null : openBilling,
+                    icon: actionIcon,
+                    label: isDeliveringRequest
+                        ? _pick(
+                            language,
+                            en: 'Delivering...',
+                            de: 'Wird geliefert...',
+                          )
+                        : isSendingInvoice
+                        ? _pick(
+                            language,
+                            en: 'Opening review...',
+                            de: 'Prüfung wird geöffnet...',
+                          )
+                        : actionLabel,
+                    onPressed: actionCallback,
                   ),
                 ],
               ),
@@ -967,13 +1002,35 @@ class AdminRequestDetailPane extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     _AdminHeaderActionButton(
-                      icon: Icons.receipt_long_rounded,
-                      label: _pick(
-                        language,
-                        en: isCompact ? 'Review' : 'Internal review',
-                        de: isCompact ? 'Pruefen' : 'Interne Pruefung',
-                      ),
-                      onPressed: onSendInvoice,
+                      icon: onDeliverRequest != null
+                          ? Icons.local_shipping_outlined
+                          : Icons.receipt_long_rounded,
+                      label: onDeliverRequest != null
+                          ? _pick(
+                              language,
+                              en: isCompact
+                                  ? (isDeliveringRequest
+                                        ? 'Delivering'
+                                        : 'Deliver')
+                                  : (isDeliveringRequest
+                                        ? 'Delivering...'
+                                        : 'Deliver'),
+                              de: isCompact
+                                  ? (isDeliveringRequest
+                                        ? 'Lieferung'
+                                        : 'Liefern')
+                                  : (isDeliveringRequest
+                                        ? 'Wird geliefert...'
+                                        : 'Liefern'),
+                            )
+                          : _pick(
+                              language,
+                              en: isCompact ? 'Review' : 'Internal review',
+                              de: isCompact ? 'Pruefen' : 'Interne Pruefung',
+                            ),
+                      onPressed: onDeliverRequest != null
+                          ? (isDeliveringRequest ? null : onDeliverRequest)
+                          : (isSendingInvoice ? null : onSendInvoice),
                     ),
                     const SizedBox(width: 8),
                     StatusChip(

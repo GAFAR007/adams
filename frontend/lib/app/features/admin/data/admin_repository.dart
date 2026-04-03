@@ -21,6 +21,15 @@ Map<String, dynamic> _compactJson(Map<String, dynamic> values) {
   );
 }
 
+String? _normalizedOptionalString(String? value) {
+  if (value == null) {
+    return null;
+  }
+
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 final adminRepositoryProvider = Provider<AdminRepository>((ref) {
   return AdminRepository(ref.read(apiClientProvider));
 });
@@ -139,6 +148,10 @@ class AdminRepository {
     );
   }
 
+  Future<void> deliverRequest({required String requestId}) async {
+    await _client.patchJson('/admin/requests/$requestId/deliver');
+  }
+
   Future<void> sendMessage({
     required String requestId,
     required String message,
@@ -208,16 +221,18 @@ class AdminRepository {
         'adminServiceChargePercent': adminServiceChargePercent,
         'dueDate': dueDate,
         ..._compactJson(<String, dynamic>{
-          'reviewKind': reviewKind,
-          'siteReviewDate': siteReviewDate,
-          'siteReviewStartTime': siteReviewStartTime,
-          'siteReviewEndTime': siteReviewEndTime,
+          'reviewKind': _normalizedOptionalString(reviewKind),
+          'siteReviewDate': _normalizedOptionalString(siteReviewDate),
+          'siteReviewStartTime': _normalizedOptionalString(siteReviewStartTime),
+          'siteReviewEndTime': _normalizedOptionalString(siteReviewEndTime),
           'siteReviewNotes': siteReviewNotes,
-          'plannedStartDate': plannedStartDate,
-          'plannedStartTime': plannedStartTime,
-          'plannedEndTime': plannedEndTime,
+          'plannedStartDate': _normalizedOptionalString(plannedStartDate),
+          'plannedStartTime': _normalizedOptionalString(plannedStartTime),
+          'plannedEndTime': _normalizedOptionalString(plannedEndTime),
           'plannedHoursPerDay': plannedHoursPerDay,
-          'plannedExpectedEndDate': plannedExpectedEndDate,
+          'plannedExpectedEndDate': _normalizedOptionalString(
+            plannedExpectedEndDate,
+          ),
           'plannedDailySchedule': plannedDailySchedule,
         }),
         'paymentMethod': paymentMethod,

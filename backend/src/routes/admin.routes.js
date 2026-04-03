@@ -11,6 +11,7 @@ const {
   adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
+  adminDeliverRequestController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
@@ -48,6 +49,7 @@ const {
   adminCalendarFiltersValidator,
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
+  adminDeliverRequestValidator,
   adminDeleteStaffInviteValidator,
   adminPostRequestMessageValidator,
   adminRequestFiltersValidator,
@@ -93,6 +95,12 @@ function createAdminRouter() {
     adminAssignRequestValidator,
     validateRequest,
     adminAssignRequestController,
+  );
+  router.patch(
+    "/requests/:requestId/deliver",
+    adminDeliverRequestValidator,
+    validateRequest,
+    adminDeliverRequestController,
   );
   router.patch(
     "/requests/:requestId/estimations/select",

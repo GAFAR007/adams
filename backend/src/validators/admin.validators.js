@@ -36,6 +36,10 @@ const adminAssignRequestValidator = [
   body('staffId').isMongoId().withMessage('Staff ID is required'),
 ];
 
+const adminDeliverRequestValidator = [
+  param('requestId').isMongoId().withMessage('Request ID must be valid'),
+];
+
 const adminSelectRequestEstimationValidator = [
   param('requestId').isMongoId().withMessage('Request ID must be valid'),
   body('estimationId').isMongoId().withMessage('Estimation ID is required'),
@@ -202,6 +206,7 @@ module.exports = {
   adminCalendarFiltersValidator,
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
+  adminDeliverRequestValidator,
   adminDeleteStaffInviteValidator,
   adminPostRequestMessageValidator,
   adminRequestFiltersValidator,

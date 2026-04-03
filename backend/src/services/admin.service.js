@@ -424,6 +424,86 @@ async function loadAdminVisibleRequest(requestId) {
   return populateServiceRequestRelations(ServiceRequest.findById(requestId));
 }
 
+async function deliverRequest(adminUser, requestId, logContext) {
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation: 'AdminDeliverRequest',
+    intent: 'Close a completed job after admin verifies the final delivery state',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'AdminDeliverRequest',
+    intent: 'Load the request before marking it delivered',
+  });
+
+  const request = await loadAdminVisibleRequest(requestId);
+
+  if (!request) {
+    throw new AppError({
+      message: 'Service request not found',
+      statusCode: 404,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_DELIVER_REQUEST_NOT_FOUND',
+      resolutionHint: 'Refresh the request list and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (request.status === REQUEST_STATUSES.CLOSED) {
+    throw new AppError({
+      message: 'Request is already delivered',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_DELIVER_REQUEST_ALREADY_CLOSED',
+      resolutionHint: 'Continue with another active request instead',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  if (request.status !== REQUEST_STATUSES.WORK_DONE) {
+    throw new AppError({
+      message: 'Only completed work can be marked as delivered',
+      statusCode: 409,
+      classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode: 'ADMIN_DELIVER_REQUEST_INVALID_STAGE',
+      resolutionHint: 'Wait for the assigned technician or contractor to complete the work first',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  const adminName =
+    [adminUser?.firstName, adminUser?.lastName]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean)
+      .join(' ') || 'Admin Team';
+
+  request.status = REQUEST_STATUSES.CLOSED;
+  request.finishedAt = request.finishedAt || new Date();
+  request.closedAt = new Date();
+  request.messages.push(
+    buildSystemMessage(`Work delivered by ${adminName}.`),
+  );
+  await request.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'AdminDeliverRequest',
+    intent: 'Confirm the completed request was marked delivered and closed',
+  });
+
+  return {
+    message: 'Request marked as delivered successfully',
+    request: serializeServiceRequest(request),
+  };
+}
+
 async function postRequestMessage(adminUser, requestId, text, actionType, logContext) {
   logInfo({
     ...logContext,
@@ -1246,6 +1326,7 @@ module.exports = {
   createRequestInvoice,
   createStaffInvite,
   deleteStaffInvite,
+  deliverRequest,
   getDashboard,
   listCalendarRequests,
   listRequests,

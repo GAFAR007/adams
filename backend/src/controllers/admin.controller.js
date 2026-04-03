@@ -79,6 +79,27 @@ const adminAssignRequestController = asyncHandler(async (req, res) => {
   });
 });
 
+const adminDeliverRequestController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminDeliverRequest',
+    intent: 'Mark a completed job as delivered from the admin request workspace',
+  });
+
+  const result = await adminService.deliverRequest(
+    req.authUser,
+    req.params.requestId,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const adminSelectRequestEstimationController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -265,6 +286,7 @@ module.exports = {
   adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
+  adminDeliverRequestController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,

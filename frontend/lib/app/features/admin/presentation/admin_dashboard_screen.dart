@@ -101,6 +101,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   final Set<String> _inviteIdsBeingDeleted = <String>{};
   final Set<String> _sendingMessageRequestIds = <String>{};
   final Set<String> _sendingInvoiceRequestIds = <String>{};
+  final Set<String> _deliveringRequestIds = <String>{};
   final Set<String> _uploadingAttachmentRequestIds = <String>{};
   final Set<String> _reviewingPaymentProofRequestIds = <String>{};
   String? _lastThreadScrollSignature;
@@ -460,6 +461,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
         request.quoteReadyEstimation != null;
   }
 
+  bool _canDeliverRequest(ServiceRequestModel request) {
+    return request.status == 'work_done';
+  }
+
   Future<void> _saveInternalReview(ServiceRequestModel request) async {
     final draft = await Navigator.of(context).push<InvoiceDraftInput>(
       MaterialPageRoute<InvoiceDraftInput>(
@@ -529,6 +534,44 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _sendingInvoiceRequestIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _deliverRequest(ServiceRequestModel request) async {
+    setState(() => _deliveringRequestIds.add(request.id));
+
+    try {
+      await ref
+          .read(adminRepositoryProvider)
+          .deliverRequest(requestId: request.id);
+      ref.invalidate(adminDashboardProvider);
+      ref.invalidate(adminRequestsProvider(_currentRequestQuery()));
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(en: 'Request delivered', de: 'Anfrage als geliefert markiert'),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _deliveringRequestIds.remove(request.id));
       }
     }
   }
@@ -962,6 +1005,11 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                               !_canOpenInternalReview(selectedRequest)
                           ? null
                           : () => _saveInternalReview(selectedRequest),
+                      onDeliverRequest:
+                          selectedRequest == null ||
+                              !_canDeliverRequest(selectedRequest)
+                          ? null
+                          : () => _deliverRequest(selectedRequest),
                       onOpenPaymentProof:
                           selectedRequest?.invoice?.proof?.fileUrl == null
                           ? null
@@ -1012,6 +1060,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                           _sendingInvoiceRequestIds.contains(
                             selectedRequest.id,
                           ),
+                      isDeliveringRequest:
+                          selectedRequest != null &&
+                          _deliveringRequestIds.contains(selectedRequest.id),
                       isReviewingPaymentProof:
                           selectedRequest != null &&
                           _reviewingPaymentProofRequestIds.contains(
@@ -1049,6 +1100,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 onSendInvoice: !_canOpenInternalReview(selectedRequest)
                     ? null
                     : () => _saveInternalReview(selectedRequest),
+                onDeliverRequest: !_canDeliverRequest(selectedRequest)
+                    ? null
+                    : () => _deliverRequest(selectedRequest),
                 onOpenPaymentProof:
                     selectedRequest.invoice?.proof?.fileUrl == null
                     ? null
@@ -1082,6 +1136,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 onUploadAttachment: () =>
                     _uploadRequestAttachment(selectedRequest),
                 isSendingInvoice: _sendingInvoiceRequestIds.contains(
+                  selectedRequest.id,
+                ),
+                isDeliveringRequest: _deliveringRequestIds.contains(
                   selectedRequest.id,
                 ),
                 isReviewingPaymentProof: _reviewingPaymentProofRequestIds
