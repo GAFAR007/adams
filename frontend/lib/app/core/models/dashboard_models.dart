@@ -5,12 +5,26 @@ library;
 
 import 'service_request_model.dart';
 
+String _staffTypeLabel(String? staffType) {
+  switch (staffType) {
+    case 'customer_care':
+      return 'Customer Care';
+    case 'contractor':
+      return 'Contractor';
+    case 'technician':
+      return 'Technician';
+    default:
+      return 'Staff';
+  }
+}
+
 class StaffMemberSummary {
   const StaffMemberSummary({
     required this.id,
     required this.fullName,
     required this.email,
     required this.phone,
+    required this.staffType,
     required this.staffAvailability,
     required this.assignedOpenRequestCount,
     required this.clearedTodayCount,
@@ -20,9 +34,12 @@ class StaffMemberSummary {
   final String fullName;
   final String email;
   final String? phone;
+  final String? staffType;
   final String? staffAvailability;
   final int assignedOpenRequestCount;
   final int clearedTodayCount;
+
+  String get staffTypeLabel => _staffTypeLabel(staffType);
 
   factory StaffMemberSummary.fromJson(Map<String, dynamic> json) {
     return StaffMemberSummary(
@@ -30,6 +47,7 @@ class StaffMemberSummary {
       fullName: json['fullName'] as String? ?? '',
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
+      staffType: json['staffType'] as String?,
       staffAvailability: json['staffAvailability'] as String?,
       assignedOpenRequestCount: json['assignedOpenRequestCount'] as int? ?? 0,
       clearedTodayCount: json['clearedTodayCount'] as int? ?? 0,
@@ -43,6 +61,7 @@ class StaffInviteModel {
     required this.fullName,
     required this.email,
     required this.phone,
+    required this.staffType,
     required this.expiresAt,
     required this.inviteLink,
   });
@@ -51,8 +70,11 @@ class StaffInviteModel {
   final String fullName;
   final String email;
   final String? phone;
+  final String staffType;
   final DateTime? expiresAt;
   final String inviteLink;
+
+  String get staffTypeLabel => _staffTypeLabel(staffType);
 
   factory StaffInviteModel.fromJson(Map<String, dynamic> json) {
     final firstName = json['firstName'] as String? ?? '';
@@ -63,6 +85,7 @@ class StaffInviteModel {
       fullName: '$firstName $lastName'.trim(),
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
+      staffType: json['staffType'] as String? ?? 'technician',
       expiresAt: DateTime.tryParse(json['expiresAt'] as String? ?? ''),
       inviteLink: json['inviteLink'] as String? ?? '',
     );

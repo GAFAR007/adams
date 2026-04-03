@@ -20,7 +20,12 @@ const customerCreateRequestController = asyncHandler(async (req, res) => {
   });
 
   // WHY: The service owns customer lookup and request persistence so request rules stay centralized.
-  const result = await customerService.createRequest(req.authUser.id, req.body, logContext);
+  const result = await customerService.createRequest(
+    req.authUser.id,
+    req.body,
+    Array.isArray(req.files) ? req.files : [],
+    logContext,
+  );
   res.status(201).json(result);
   emitRequestUpdated(result.request);
 
@@ -63,6 +68,27 @@ const customerPostRequestMessageController = asyncHandler(async (req, res) => {
   );
   res.status(200).json(result);
   emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const customerSuggestRequestReplyController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'CustomerSuggestRequestReply',
+    intent: 'Generate a professional customer reply suggestion for an owned service-request thread',
+  });
+
+  const result = await customerService.suggestRequestReply(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.draft || '',
+    logContext,
+  );
+  res.status(200).json(result);
 
   logInfo({
     ...logContext,
@@ -214,6 +240,7 @@ module.exports = {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerSuggestRequestReplyController,
   customerReplaceRequestAttachmentController,
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,

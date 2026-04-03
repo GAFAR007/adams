@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -38,7 +39,9 @@ class AuthController extends Notifier<AuthState> {
       return;
     }
 
-    state = state.copyWith(isBootstrapping: true, clearError: true);
+    _updateStateSafely(
+      (current) => current.copyWith(isBootstrapping: true, clearError: true),
+    );
     debugPrint(
       'AuthController.bootstrapSession: attempting refresh-based bootstrap',
     );
@@ -58,14 +61,7 @@ class AuthController extends Notifier<AuthState> {
       _applySession(session);
     } catch (_) {
       // A failed refresh at startup should land the app in a clean logged-out state.
-      _sessionStorage.clear();
-      _client.setAccessToken(null);
-      state = state.copyWith(
-        isBootstrapping: false,
-        hasBootstrapped: true,
-        clearSession: true,
-        clearError: true,
-      );
+      _clearSessionState();
     }
   }
 
@@ -145,41 +141,30 @@ class AuthController extends Notifier<AuthState> {
     try {
       await _authRepository.logout();
     } finally {
-      _sessionStorage.clear();
-      _client.setAccessToken(null);
-      state = state.copyWith(
-        isBootstrapping: false,
-        hasBootstrapped: true,
-        isSubmitting: false,
-        clearSession: true,
-        clearError: true,
-      );
+      _clearSessionState(isSubmitting: false);
     }
   }
 
   void clearError() {
-    state = state.copyWith(clearError: true);
+    _updateStateSafely((current) => current.copyWith(clearError: true));
   }
 
   Future<void> _runAuthAction(Future<void> Function() action) async {
-    state = state.copyWith(
-      isSubmitting: true,
-      clearError: true,
-      hasBootstrapped: true,
-      isBootstrapping: false,
+    _updateStateSafely(
+      (current) => current.copyWith(
+        isSubmitting: true,
+        clearError: true,
+        hasBootstrapped: true,
+        isBootstrapping: false,
+      ),
     );
 
     try {
       await action();
     } catch (error) {
-      _sessionStorage.clear();
-      _client.setAccessToken(null);
-      state = state.copyWith(
+      _clearSessionState(
         isSubmitting: false,
-        hasBootstrapped: true,
-        isBootstrapping: false,
         errorMessage: error.toString().replaceFirst('Exception: ', ''),
-        clearSession: true,
       );
       rethrow;
     }
@@ -188,13 +173,15 @@ class AuthController extends Notifier<AuthState> {
   void _applySession(AuthSession session) {
     _sessionStorage.save(session);
     _client.setAccessToken(session.accessToken);
-    state = state.copyWith(
-      user: session.user,
-      accessToken: session.accessToken,
-      isSubmitting: false,
-      isBootstrapping: false,
-      hasBootstrapped: true,
-      clearError: true,
+    _updateStateSafely(
+      (current) => current.copyWith(
+        user: session.user,
+        accessToken: session.accessToken,
+        isSubmitting: false,
+        isBootstrapping: false,
+        hasBootstrapped: true,
+        clearError: true,
+      ),
     );
   }
 
@@ -202,9 +189,63 @@ class AuthController extends Notifier<AuthState> {
     try {
       final refreshedSession = await _authRepository.refresh();
       _applySession(refreshedSession);
-    } catch (_) {
-      // WHY: Keep the restored local session active when silent refresh fails so the user does not get logged out on every reload.
+    } catch (error) {
+      if (_isSessionInvalidationError(error)) {
+        Future<void>(() => _clearSessionState());
+      }
+
+      // WHY: Keep the restored local session active when silent refresh fails for transient network/backend reasons.
     }
+  }
+
+  void _clearSessionState({bool isSubmitting = false, String? errorMessage}) {
+    _sessionStorage.clear();
+    _client.setAccessToken(null);
+    _updateStateSafely(
+      (current) => current.copyWith(
+        isBootstrapping: false,
+        hasBootstrapped: true,
+        isSubmitting: isSubmitting,
+        errorMessage: errorMessage,
+        clearSession: true,
+        clearError: errorMessage == null,
+      ),
+    );
+  }
+
+  void _updateStateSafely(AuthState Function(AuthState current) transform) {
+    void apply() {
+      state = transform(state);
+    }
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      apply();
+      return;
+    }
+
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      apply();
+    });
+  }
+
+  bool _isSessionInvalidationError(Object error) {
+    if (error is! ApiException) {
+      return false;
+    }
+
+    if (error.statusCode == 401 || error.statusCode == 403) {
+      return true;
+    }
+
+    return switch (error.errorCode) {
+      'AUTH_REFRESH_TOKEN_INVALID' ||
+      'AUTH_REFRESH_SESSION_INVALID' ||
+      'AUTH_REFRESH_USER_INACTIVE' ||
+      'AUTH_ACCESS_TOKEN_INVALID' => true,
+      _ => false,
+    };
   }
 
   bool _isAccessTokenExpired(String token) {

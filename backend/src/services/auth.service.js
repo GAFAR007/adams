@@ -430,7 +430,7 @@ function resolveDemoPassword(
 
   if (
     role === USER_ROLES.STAFF &&
-    /^staff\d+@adams\.local$/.test(
+    /^(care|staff)\d+@adams\.local$/.test(
       normalizedEmail,
     )
   ) {
@@ -928,6 +928,9 @@ async function getDemoAccounts(
         fullName:
           `${user.firstName} ${user.lastName}`.trim(),
         email: user.email,
+        role: user.role,
+        staffType:
+          user.staffType || null,
         quickFillPassword:
           resolveDemoPassword(
             role,

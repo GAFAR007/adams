@@ -3,19 +3,21 @@ library;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/models/public_company_profile.dart';
+import '../../../shared/presentation/app_language_toggle.dart';
 import '../../../theme/app_theme.dart';
 
-enum PublicSiteLanguage { english, german }
+typedef PublicSiteLanguage = AppLanguage;
 
 enum PublicNavItem { none, home, about, services, legal, contact }
 
 PublicSiteLanguage publicSiteLanguageFromCode(String? code) {
-  return code == 'de' ? PublicSiteLanguage.german : PublicSiteLanguage.english;
+  return appLanguageFromCode(code);
 }
 
 String publicSiteLanguageCode(PublicSiteLanguage language) {
-  return language == PublicSiteLanguage.german ? 'de' : 'en';
+  return appLanguageCode(language);
 }
 
 String resolvePublicText(LocalizedText value, PublicSiteLanguage language) {
@@ -51,6 +53,7 @@ class PublicSiteShell extends StatelessWidget {
     this.heroVisual,
     this.heroActions,
     this.heroDetails,
+    this.showLanguageToggle = false,
   });
 
   final PublicCompanyProfileModel profile;
@@ -64,6 +67,7 @@ class PublicSiteShell extends StatelessWidget {
   final Widget? heroVisual;
   final Widget? heroActions;
   final Widget? heroDetails;
+  final bool showLanguageToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +115,7 @@ class PublicSiteShell extends StatelessWidget {
                           language: language,
                           onLanguageChanged: onLanguageChanged,
                           isCompact: isCompact,
+                          showLanguageToggle: showLanguageToggle,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -171,6 +176,7 @@ class _PublicUtilityBar extends StatelessWidget {
     required this.language,
     required this.onLanguageChanged,
     required this.isCompact,
+    required this.showLanguageToggle,
   });
 
   final String quoteLabel;
@@ -178,6 +184,7 @@ class _PublicUtilityBar extends StatelessWidget {
   final PublicSiteLanguage language;
   final ValueChanged<PublicSiteLanguage> onLanguageChanged;
   final bool isCompact;
+  final bool showLanguageToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -206,19 +213,21 @@ class _PublicUtilityBar extends StatelessWidget {
               children: <Widget>[
                 items,
                 const SizedBox(height: 12),
-                _PublicLanguageToggle(
-                  language: language,
-                  onChanged: onLanguageChanged,
-                ),
+                if (showLanguageToggle)
+                  AppLanguageToggle(
+                    language: language,
+                    onChanged: onLanguageChanged,
+                  ),
               ],
             )
           : Row(
               children: <Widget>[
                 Expanded(child: items),
-                _PublicLanguageToggle(
-                  language: language,
-                  onChanged: onLanguageChanged,
-                ),
+                if (showLanguageToggle)
+                  AppLanguageToggle(
+                    language: language,
+                    onChanged: onLanguageChanged,
+                  ),
               ],
             ),
     );
@@ -246,81 +255,6 @@ class _UtilityItem extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _PublicLanguageToggle extends StatelessWidget {
-  const _PublicLanguageToggle({
-    required this.language,
-    required this.onChanged,
-  });
-
-  final PublicSiteLanguage language;
-  final ValueChanged<PublicSiteLanguage> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            _PublicLanguageChip(
-              label: 'EN',
-              isSelected: language == PublicSiteLanguage.english,
-              onTap: () => onChanged(PublicSiteLanguage.english),
-            ),
-            const SizedBox(width: 4),
-            _PublicLanguageChip(
-              label: 'DE',
-              isSelected: language == PublicSiteLanguage.german,
-              onTap: () => onChanged(PublicSiteLanguage.german),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PublicLanguageChip extends StatelessWidget {
-  const _PublicLanguageChip({
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: isSelected ? AppTheme.ink : Colors.white,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -484,7 +418,7 @@ class _DesktopPublicNavGroup extends StatelessWidget {
       decoration: BoxDecoration(
         color: Color.lerp(Colors.white, AppTheme.sand, 0.72),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE8DECF)),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Wrap(
         spacing: 4,
@@ -537,7 +471,7 @@ class _PublicCompactMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: copy.menuLabel,
-      color: const Color(0xFFF8F4EC),
+      color: AppTheme.shellRaised,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       onSelected: (value) {
@@ -703,7 +637,7 @@ class _PublicServicesDropdown extends StatelessWidget {
           ),
           PopupMenuButton<String>(
             tooltip: label,
-            color: const Color(0xFFF8F4EC),
+            color: AppTheme.shellRaised,
             surfaceTintColor: Colors.transparent,
             elevation: 14,
             offset: const Offset(0, 10),
@@ -996,7 +930,7 @@ class PublicSurfaceCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFE8DECF)),
+        border: Border.all(color: AppTheme.border),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: AppTheme.ink.withValues(alpha: 0.08),

@@ -34,13 +34,13 @@ class RequestMessageComposer extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: dark
-            ? const Color(0xFF0D0E10)
-            : Colors.white.withValues(alpha: 0.88),
+            ? AppTheme.darkPage
+            : AppTheme.shell.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
           color: dark
-              ? Colors.white.withValues(alpha: 0.06)
-              : AppTheme.clay.withValues(alpha: 0.38),
+              ? AppTheme.darkBorder
+              : AppTheme.border.withValues(alpha: 0.56),
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
@@ -74,17 +74,17 @@ class RequestMessageComposer extends StatelessWidget {
                       return DecoratedBox(
                         decoration: BoxDecoration(
                           color: dark
-                              ? Colors.white.withValues(
-                                  alpha: canSubmit ? 0.98 : 0.7,
+                              ? AppTheme.darkText.withValues(
+                                  alpha: canSubmit ? 0.98 : 0.74,
                                 )
-                              : AppTheme.sand.withValues(
-                                  alpha: canSubmit ? 0.76 : 0.52,
+                              : AppTheme.shellMuted.withValues(
+                                  alpha: canSubmit ? 0.86 : 0.7,
                                 ),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
                             color: dark
-                                ? Colors.white.withValues(alpha: 0.04)
-                                : AppTheme.clay.withValues(alpha: 0.3),
+                                ? AppTheme.darkText.withValues(alpha: 0.05)
+                                : AppTheme.border.withValues(alpha: 0.42),
                           ),
                         ),
                         child: Padding(
@@ -115,9 +115,7 @@ class RequestMessageComposer extends StatelessWidget {
                                               ? Colors.black.withValues(
                                                   alpha: 0.42,
                                                 )
-                                              : AppTheme.ink.withValues(
-                                                  alpha: 0.46,
-                                                ),
+                                              : AppTheme.textMuted,
                                         ),
                                     filled: false,
                                   ),
@@ -153,20 +151,36 @@ class RequestMessageComposer extends StatelessWidget {
                           end: Alignment.bottomRight,
                           colors: <Color>[
                             canSubmit
-                                ? AppTheme.cobalt
-                                : AppTheme.cobalt.withValues(alpha: 0.45),
+                                ? (dark ? AppTheme.darkAccent : AppTheme.cobalt)
+                                : (dark
+                                      ? AppTheme.darkAccent.withValues(
+                                          alpha: 0.45,
+                                        )
+                                      : AppTheme.cobalt.withValues(
+                                          alpha: 0.45,
+                                        )),
                             canSubmit
-                                ? AppTheme.cobalt.withValues(alpha: 0.82)
-                                : AppTheme.cobalt.withValues(alpha: 0.35),
+                                ? (dark
+                                      ? AppTheme.darkAccentSurface
+                                      : AppTheme.cobalt.withValues(alpha: 0.82))
+                                : (dark
+                                      ? AppTheme.darkAccentSurface.withValues(
+                                          alpha: 0.72,
+                                        )
+                                      : AppTheme.cobalt.withValues(
+                                          alpha: 0.35,
+                                        )),
                           ],
                         ),
                         shape: BoxShape.circle,
                         boxShadow: canSubmit
                             ? <BoxShadow>[
                                 BoxShadow(
-                                  color: AppTheme.cobalt.withValues(
-                                    alpha: 0.24,
-                                  ),
+                                  color:
+                                      (dark
+                                              ? AppTheme.darkAccent
+                                              : AppTheme.cobalt)
+                                          .withValues(alpha: 0.24),
                                   blurRadius: 20,
                                   offset: const Offset(0, 10),
                                 ),

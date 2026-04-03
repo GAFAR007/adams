@@ -8,12 +8,17 @@ const express = require("express");
 
 const {
   staffAttendQueueRequestController,
+  staffCalendarController,
+  staffClockRequestWorkController,
   staffCreateRequestInvoiceController,
   staffDashboardController,
   staffListRequestsController,
   staffPostRequestMessageController,
+  staffSuggestRequestReplyController,
+  staffUnlockInvoiceProofUploadController,
   staffReviewPaymentProofController,
   staffRegisterController,
+  staffSubmitRequestEstimationController,
   staffUploadRequestAttachmentController,
   staffUpdateAvailabilityController,
   staffUpdateRequestAiControlController,
@@ -25,6 +30,8 @@ const {
   listInternalChatsController,
   markInternalChatReadController,
   postInternalChatMessageController,
+  suggestInternalChatReplyController,
+  uploadInternalChatAttachmentController,
 } = require("../controllers/internal-chat.controller");
 const {
   USER_ROLES,
@@ -44,11 +51,16 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   staffAttendQueueRequestValidator,
+  staffCalendarFiltersValidator,
+  staffClockRequestWorkValidator,
   staffCreateRequestInvoiceValidator,
   staffPostRequestMessageValidator,
+  staffSuggestRequestReplyValidator,
   staffReviewPaymentProofValidator,
   staffRegisterValidator,
   staffRequestFiltersValidator,
+  staffSubmitRequestEstimationValidator,
+  staffUnlockPaymentProofValidator,
   staffUploadRequestAttachmentValidator,
   staffUpdateAvailabilityValidator,
   staffUpdateRequestAiControlValidator,
@@ -59,6 +71,8 @@ const {
   createGroupInternalChatValidator,
   markInternalChatReadValidator,
   postInternalChatMessageValidator,
+  suggestInternalChatReplyValidator,
+  uploadInternalChatAttachmentValidator,
 } = require("../validators/internal-chat.validators");
 
 function createStaffRouter() {
@@ -82,6 +96,12 @@ function createStaffRouter() {
   router.get(
     "/dashboard",
     staffDashboardController,
+  );
+  router.get(
+    "/calendar",
+    staffCalendarFiltersValidator,
+    validateRequest,
+    staffCalendarController,
   );
   router.patch(
     "/availability",
@@ -108,6 +128,18 @@ function createStaffRouter() {
     staffUpdateRequestStatusController,
   );
   router.post(
+    "/requests/:requestId/estimations",
+    staffSubmitRequestEstimationValidator,
+    validateRequest,
+    staffSubmitRequestEstimationController,
+  );
+  router.post(
+    "/requests/:requestId/reply-assistant",
+    staffSuggestRequestReplyValidator,
+    validateRequest,
+    staffSuggestRequestReplyController,
+  );
+  router.post(
     "/requests/:requestId/messages",
     staffPostRequestMessageValidator,
     validateRequest,
@@ -127,6 +159,12 @@ function createStaffRouter() {
     staffUpdateRequestAiControlController,
   );
   router.post(
+    "/requests/:requestId/work-log",
+    staffClockRequestWorkValidator,
+    validateRequest,
+    staffClockRequestWorkController,
+  );
+  router.post(
     "/requests/:requestId/invoice",
     staffCreateRequestInvoiceValidator,
     validateRequest,
@@ -137,6 +175,12 @@ function createStaffRouter() {
     staffReviewPaymentProofValidator,
     validateRequest,
     staffReviewPaymentProofController,
+  );
+  router.patch(
+    "/requests/:requestId/invoice/proof/unlock",
+    staffUnlockPaymentProofValidator,
+    validateRequest,
+    staffUnlockInvoiceProofUploadController,
   );
   router.get(
     "/internal-chats",
@@ -159,6 +203,19 @@ function createStaffRouter() {
     postInternalChatMessageValidator,
     validateRequest,
     postInternalChatMessageController,
+  );
+  router.post(
+    "/internal-chats/:threadId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    uploadInternalChatAttachmentValidator,
+    validateRequest,
+    uploadInternalChatAttachmentController,
+  );
+  router.post(
+    "/internal-chats/:threadId/reply-assistant",
+    suggestInternalChatReplyValidator,
+    validateRequest,
+    suggestInternalChatReplyController,
   );
   router.post(
     "/internal-chats/:threadId/read",

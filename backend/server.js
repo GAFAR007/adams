@@ -80,9 +80,13 @@ if (require.main === module) {
       businessIdPresent: false,
       userRole: "system",
       classification:
+        error.adamsClassification ||
         "UNKNOWN_PROVIDER_ERROR",
-      error_code: "SERVER_START_FAILED",
+      error_code:
+        error.adamsErrorCode ||
+        "SERVER_START_FAILED",
       resolution_hint:
+        error.adamsResolutionHint ||
         "Check environment variables and MongoDB availability",
       message: error.message,
     });

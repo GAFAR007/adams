@@ -4,6 +4,28 @@
  * HOW: Map each entity into a plain object with only the fields required by UI flows.
  */
 
+const {
+  buildRequestScheduleSummary,
+  calculateEstimatedDays,
+  getCompleteFinalRequestEstimations,
+  isCompleteRequestEstimation,
+  resolveEstimationStage,
+} = require('./request-estimation');
+
+function resolveEstimationSubmitterStaffType(estimation) {
+  return estimation?.submitterStaffType || estimation?.submittedBy?.staffType || null;
+}
+
+function resolveEstimationAssignmentType(estimation) {
+  if (estimation?.assignmentType) {
+    return estimation.assignmentType;
+  }
+
+  return resolveEstimationSubmitterStaffType(estimation) === 'contractor'
+    ? 'external'
+    : 'internal';
+}
+
 function serializeUser(user) {
   // WHY: Keep null handling centralized so callers do not need to guard every serializer call.
   if (!user) {
@@ -19,6 +41,7 @@ function serializeUser(user) {
     email: user.email,
     phone: user.phone || null,
     role: user.role,
+    staffType: user.staffType || null,
     status: user.status,
     staffAvailability: user.staffAvailability || null,
     createdAt: user.createdAt?.toISOString?.() || null,
@@ -78,6 +101,7 @@ function serializeInternalChatMessage(
     senderName: message.senderName || '',
     senderRole: message.senderRole || message.sender?.role || null,
     text: message.text || '',
+    attachment: serializeRequestMessageAttachment(message.attachment),
     createdAt,
     isOwn,
     receiptStatus,
@@ -178,6 +202,10 @@ function serializeRequestMessage(message) {
     senderId: message.senderId ? String(message.senderId) : null,
     senderName: message.senderName || '',
     actionType: message.actionType || null,
+    actionPayload:
+      message.actionPayload && typeof message.actionPayload === 'object'
+        ? message.actionPayload
+        : null,
     text: message.text || '',
     attachment: serializeRequestMessageAttachment(message.attachment),
     createdAt: message.createdAt?.toISOString?.() || null,
@@ -210,6 +238,7 @@ function serializeStaffInvite(invite, inviteLink = null) {
     lastName: invite.lastName || '',
     email: invite.email,
     phone: invite.phone || null,
+    staffType: invite.staffType || 'technician',
     expiresAt: invite.expiresAt?.toISOString?.() || null,
     acceptedAt: invite.acceptedAt?.toISOString?.() || null,
     revokedAt: invite.revokedAt?.toISOString?.() || null,
@@ -240,10 +269,57 @@ function serializeRequestInvoice(invoice) {
   }
 
   return {
+    kind: invoice.kind || null,
     invoiceNumber: invoice.invoiceNumber || '',
     amount: typeof invoice.amount === 'number' ? invoice.amount : 0,
+    quotedBaseAmount:
+      typeof invoice.quotedBaseAmount === 'number'
+        ? invoice.quotedBaseAmount
+        : 0,
+    appServiceChargePercent:
+      typeof invoice.appServiceChargePercent === 'number'
+        ? invoice.appServiceChargePercent
+        : null,
+    appServiceChargeAmount:
+      typeof invoice.appServiceChargeAmount === 'number'
+        ? invoice.appServiceChargeAmount
+        : null,
+    adminServiceChargePercent:
+      typeof invoice.adminServiceChargePercent === 'number'
+        ? invoice.adminServiceChargePercent
+        : null,
+    adminServiceChargeAmount:
+      typeof invoice.adminServiceChargeAmount === 'number'
+        ? invoice.adminServiceChargeAmount
+        : null,
     currency: invoice.currency || 'EUR',
     dueDate: invoice.dueDate?.toISOString?.() || null,
+    proofUploadDeadlineAt:
+      invoice.proofUploadDeadlineAt?.toISOString?.() || null,
+    proofUploadUnlockedAt:
+      invoice.proofUploadUnlockedAt?.toISOString?.() || null,
+    proofUploadUnlockedByRole: invoice.proofUploadUnlockedByRole || null,
+    siteReviewDate: invoice.siteReviewDate?.toISOString?.() || null,
+    siteReviewStartTime: invoice.siteReviewStartTime || '',
+    siteReviewEndTime: invoice.siteReviewEndTime || '',
+    siteReviewNotes: invoice.siteReviewNotes || '',
+    plannedStartDate: invoice.plannedStartDate?.toISOString?.() || null,
+    plannedStartTime: invoice.plannedStartTime || '',
+    plannedEndTime: invoice.plannedEndTime || '',
+    plannedHoursPerDay:
+      typeof invoice.plannedHoursPerDay === 'number'
+        ? invoice.plannedHoursPerDay
+        : null,
+    plannedExpectedEndDate:
+      invoice.plannedExpectedEndDate?.toISOString?.() || null,
+    plannedDailySchedule: Array.isArray(invoice.plannedDailySchedule)
+      ? invoice.plannedDailySchedule.map((entry) => ({
+          date: entry.date?.toISOString?.() || null,
+          startTime: entry.startTime || '',
+          endTime: entry.endTime || '',
+          hours: typeof entry.hours === 'number' ? entry.hours : null,
+        }))
+      : [],
     paymentMethod: invoice.paymentMethod || '',
     paymentInstructions: invoice.paymentInstructions || '',
     note: invoice.note || '',
@@ -263,6 +339,207 @@ function serializeRequestInvoice(invoice) {
     reviewedByRole: invoice.reviewedByRole || null,
     reviewNote: invoice.reviewNote || '',
     proof: serializePaymentProof(invoice.proof),
+  };
+}
+
+function serializeRequestAccessDetails(accessDetails) {
+  if (!accessDetails) {
+    return null;
+  }
+
+  return {
+    accessMethod: accessDetails.accessMethod || '',
+    arrivalContactName: accessDetails.arrivalContactName || '',
+    arrivalContactPhone: accessDetails.arrivalContactPhone || '',
+    accessNotes: accessDetails.accessNotes || '',
+  };
+}
+
+function serializeRequestMediaSummary(mediaSummary) {
+  if (!mediaSummary) {
+    return {
+      photoCount: 0,
+      videoCount: 0,
+      documentCount: 0,
+      intakePhotoCount: 0,
+      intakeVideoCount: 0,
+      updatedAt: null,
+    };
+  }
+
+  return {
+    photoCount: typeof mediaSummary.photoCount === 'number' ? mediaSummary.photoCount : 0,
+    videoCount: typeof mediaSummary.videoCount === 'number' ? mediaSummary.videoCount : 0,
+    documentCount:
+      typeof mediaSummary.documentCount === 'number' ? mediaSummary.documentCount : 0,
+    intakePhotoCount:
+      typeof mediaSummary.intakePhotoCount === 'number' ? mediaSummary.intakePhotoCount : 0,
+    intakeVideoCount:
+      typeof mediaSummary.intakeVideoCount === 'number' ? mediaSummary.intakeVideoCount : 0,
+    updatedAt: mediaSummary.updatedAt?.toISOString?.() || null,
+  };
+}
+
+function serializeQuoteReview(review) {
+  if (!review) {
+    return null;
+  }
+
+  return {
+    kind: review.kind || null,
+    quotedBaseAmount:
+      typeof review.quotedBaseAmount === 'number' ? review.quotedBaseAmount : 0,
+    appServiceChargePercent:
+      typeof review.appServiceChargePercent === 'number'
+        ? review.appServiceChargePercent
+        : null,
+    appServiceChargeAmount:
+      typeof review.appServiceChargeAmount === 'number'
+        ? review.appServiceChargeAmount
+        : null,
+    adminServiceChargePercent:
+      typeof review.adminServiceChargePercent === 'number'
+        ? review.adminServiceChargePercent
+        : null,
+    adminServiceChargeAmount:
+      typeof review.adminServiceChargeAmount === 'number'
+        ? review.adminServiceChargeAmount
+        : null,
+    totalAmount: typeof review.totalAmount === 'number' ? review.totalAmount : 0,
+    currency: review.currency || 'EUR',
+    selectedEstimationId: review.selectedEstimationId
+      ? String(review.selectedEstimationId)
+      : null,
+    dueDate: review.dueDate?.toISOString?.() || null,
+    siteReviewDate: review.siteReviewDate?.toISOString?.() || null,
+    siteReviewStartTime: review.siteReviewStartTime || '',
+    siteReviewEndTime: review.siteReviewEndTime || '',
+    siteReviewNotes: review.siteReviewNotes || '',
+    plannedStartDate: review.plannedStartDate?.toISOString?.() || null,
+    plannedStartTime: review.plannedStartTime || '',
+    plannedEndTime: review.plannedEndTime || '',
+    plannedHoursPerDay:
+      typeof review.plannedHoursPerDay === 'number' ? review.plannedHoursPerDay : null,
+    plannedExpectedEndDate:
+      review.plannedExpectedEndDate?.toISOString?.() || null,
+    plannedDailySchedule: Array.isArray(review.plannedDailySchedule)
+      ? review.plannedDailySchedule.map((entry) => ({
+          date: entry.date?.toISOString?.() || null,
+          startTime: entry.startTime || '',
+          endTime: entry.endTime || '',
+          hours: typeof entry.hours === 'number' ? entry.hours : null,
+        }))
+      : [],
+    paymentMethod: review.paymentMethod || '',
+    paymentInstructions: review.paymentInstructions || '',
+    note: review.note || '',
+    reviewedAt: review.reviewedAt?.toISOString?.() || null,
+    reviewedByRole: review.reviewedByRole || null,
+    reviewedById: review.reviewedById ? String(review.reviewedById) : null,
+    reviewedByName: review.reviewedByName || '',
+  };
+}
+
+function serializeEstimationSubmitter(submittedBy, submitterRole, submitterStaffType = null) {
+  if (!submittedBy) {
+    return null;
+  }
+
+  if (submittedBy.firstName) {
+    return serializeUser(submittedBy);
+  }
+
+  return {
+    id: String(submittedBy._id || submittedBy.id || submittedBy),
+    firstName: '',
+    lastName: '',
+    fullName: '',
+    email: '',
+    phone: null,
+    role: submitterRole || null,
+    staffType: submitterStaffType || null,
+    status: null,
+    staffAvailability: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function serializeRequestEstimation(estimation, selectedEstimationId) {
+  if (!estimation) {
+    return null;
+  }
+
+  const estimationId = String(estimation._id || estimation.id || '');
+
+  return {
+    id: estimationId,
+    submittedBy: serializeEstimationSubmitter(
+      estimation.submittedBy,
+      estimation.submitterRole,
+      resolveEstimationSubmitterStaffType(estimation),
+    ),
+    submitterRole: estimation.submitterRole || null,
+    submitterStaffType: resolveEstimationSubmitterStaffType(estimation),
+    assignmentType: resolveEstimationAssignmentType(estimation),
+    stage: resolveEstimationStage(estimation),
+    estimatedStartDate: estimation.estimatedStartDate?.toISOString?.() || null,
+    estimatedEndDate: estimation.estimatedEndDate?.toISOString?.() || null,
+    estimatedHours:
+      typeof estimation.estimatedHours === 'number'
+        ? estimation.estimatedHours
+        : null,
+    estimatedHoursPerDay:
+      typeof estimation.estimatedHoursPerDay === 'number'
+        ? estimation.estimatedHoursPerDay
+        : null,
+    siteReviewDate: estimation.siteReviewDate?.toISOString?.() || null,
+    siteReviewStartTime: estimation.siteReviewStartTime || '',
+    siteReviewEndTime: estimation.siteReviewEndTime || '',
+    siteReviewNotes: estimation.siteReviewNotes || '',
+    siteReviewCost:
+      typeof estimation.siteReviewCost === 'number'
+        ? estimation.siteReviewCost
+        : null,
+    estimatedDays:
+      typeof estimation.estimatedDays === 'number'
+        ? estimation.estimatedDays
+        : calculateEstimatedDays(
+            estimation.estimatedStartDate,
+            estimation.estimatedEndDate,
+          ),
+    estimatedDailySchedule: Array.isArray(estimation.estimatedDailySchedule)
+      ? estimation.estimatedDailySchedule.map((entry) => ({
+          date: entry.date?.toISOString?.() || null,
+          startTime: entry.startTime || '',
+          endTime: entry.endTime || '',
+          hours: typeof entry.hours === 'number' ? entry.hours : null,
+        }))
+      : [],
+    cost: typeof estimation.cost === 'number' ? estimation.cost : 0,
+    note: estimation.note || '',
+    inspectionNote: estimation.inspectionNote || '',
+    submittedAt: estimation.submittedAt?.toISOString?.() || null,
+    isSelected:
+      Boolean(selectedEstimationId) && estimationId === String(selectedEstimationId),
+    isComplete: isCompleteRequestEstimation(estimation),
+  };
+}
+
+function serializeRequestWorkLog(workLog) {
+  if (!workLog) {
+    return null;
+  }
+
+  return {
+    id: String(workLog._id || workLog.id || ''),
+    actor: serializeEstimationSubmitter(workLog.actorId, workLog.actorRole),
+    actorRole: workLog.actorRole || null,
+    workType: workLog.workType || null,
+    startedAt: workLog.startedAt?.toISOString?.() || null,
+    stoppedAt: workLog.stoppedAt?.toISOString?.() || null,
+    note: workLog.note || '',
+    createdAt: workLog.createdAt?.toISOString?.() || null,
   };
 }
 
@@ -375,6 +652,18 @@ function serializeServiceRequest(request) {
   const customer = request.customer && request.customer.firstName ? serializeUser(request.customer) : null;
   const assignedStaff =
     request.assignedStaff && request.assignedStaff.firstName ? serializeUser(request.assignedStaff) : null;
+  const scheduleSummary = buildRequestScheduleSummary(request);
+  const selectedEstimationId = scheduleSummary.selectedEstimationId;
+  const estimations = Array.isArray(request.estimations)
+    ? request.estimations
+        .map((estimation) =>
+          serializeRequestEstimation(estimation, selectedEstimationId),
+        )
+        .filter(Boolean)
+    : [];
+  const selectedEstimation =
+    estimations.find((estimation) => estimation.isSelected) || null;
+  const completeFinalEstimations = getCompleteFinalRequestEstimations(request);
 
   return {
     id: String(request._id || request.id),
@@ -384,6 +673,17 @@ function serializeServiceRequest(request) {
     message: request.message,
     preferredDate: request.preferredDate?.toISOString?.() || null,
     preferredTimeWindow: request.preferredTimeWindow || null,
+    accessDetails: serializeRequestAccessDetails(request.accessDetails),
+    mediaSummary: serializeRequestMediaSummary(request.mediaSummary),
+    assessmentType: request.assessmentType || null,
+    assessmentStatus: request.assessmentStatus || null,
+    quoteReadinessStatus: request.quoteReadinessStatus || null,
+    latestEstimateUpdatedAt:
+      request.latestEstimateUpdatedAt?.toISOString?.() || null,
+    internalReviewUpdatedAt:
+      request.internalReviewUpdatedAt?.toISOString?.() || null,
+    quoteReadyAt: request.quoteReadyAt?.toISOString?.() || null,
+    quoteReview: serializeQuoteReview(request.quoteReview),
     invoice: serializeRequestInvoice(request.invoice),
     detailsUpdatedAt: request.detailsUpdatedAt?.toISOString?.() || null,
     location: {
@@ -398,6 +698,27 @@ function serializeServiceRequest(request) {
     },
     customer,
     assignedStaff,
+    estimations,
+    selectedEstimation,
+    selectedEstimationId: scheduleSummary.selectedEstimationId,
+    hasCompleteEstimation: scheduleSummary.hasCompleteEstimation,
+    estimationCount: scheduleSummary.estimationCount,
+    completeEstimationCount: scheduleSummary.completeEstimationCount,
+    completeFinalEstimationCount: completeFinalEstimations.length,
+    calendarStatus: scheduleSummary.calendarStatus,
+    calendarStartDate: scheduleSummary.calendarStartDate?.toISOString?.() || null,
+    calendarEndDate: scheduleSummary.calendarEndDate?.toISOString?.() || null,
+    calendarSource: scheduleSummary.calendarSource,
+    estimatedStartDate: scheduleSummary.estimatedStartDate?.toISOString?.() || null,
+    estimatedEndDate: scheduleSummary.estimatedEndDate?.toISOString?.() || null,
+    estimatedHours: scheduleSummary.estimatedHours,
+    estimatedHoursPerDay: scheduleSummary.estimatedHoursPerDay,
+    estimatedDays: scheduleSummary.estimatedDays,
+    estimatedCost: scheduleSummary.estimatedCost,
+    actualStartDate: scheduleSummary.actualStartDate?.toISOString?.() || null,
+    actualEndDate: scheduleSummary.actualEndDate?.toISOString?.() || null,
+    totalHoursWorked: scheduleSummary.totalHoursWorked,
+    totalDaysWorked: scheduleSummary.totalDaysWorked,
     aiControlEnabled: Boolean(request.aiControlEnabled),
     queueEnteredAt: request.queueEnteredAt?.toISOString?.() || null,
     attendedAt: request.attendedAt?.toISOString?.() || null,
@@ -407,6 +728,9 @@ function serializeServiceRequest(request) {
     messageCount: Array.isArray(request.messages) ? request.messages.length : 0,
     messages: Array.isArray(request.messages)
       ? request.messages.map(serializeRequestMessage).filter(Boolean)
+      : [],
+    workLogs: Array.isArray(request.workLogs)
+      ? request.workLogs.map(serializeRequestWorkLog).filter(Boolean)
       : [],
     createdAt: request.createdAt?.toISOString?.() || null,
     updatedAt: request.updatedAt?.toISOString?.() || null,
@@ -418,6 +742,7 @@ module.exports = {
   serializeInternalChatMessage,
   serializeInternalChatThread,
   serializeLocalizedText,
+  serializeRequestEstimation,
   serializeRequestMessage,
   serializeServiceRequest,
   serializeStaffInvite,

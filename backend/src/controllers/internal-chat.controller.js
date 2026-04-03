@@ -96,6 +96,50 @@ const postInternalChatMessageController = asyncHandler(async (req, res) => {
   });
 });
 
+const uploadInternalChatAttachmentController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'InternalChatUploadAttachment',
+    intent: 'Append an uploaded image or document to an internal chat thread',
+  });
+
+  const result = await internalChatService.uploadInternalChatAttachment(
+    req.authUser,
+    req.params.threadId,
+    req.file,
+    req.body.caption,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const suggestInternalChatReplyController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'InternalChatSuggestReply',
+    intent: 'Generate an AI-assisted internal chat reply suggestion for the current operator',
+  });
+
+  const result = await internalChatService.suggestInternalChatReply(
+    req.authUser,
+    req.params.threadId,
+    req.body.draft,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const markInternalChatReadController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -123,4 +167,6 @@ module.exports = {
   listInternalChatsController,
   markInternalChatReadController,
   postInternalChatMessageController,
+  suggestInternalChatReplyController,
+  uploadInternalChatAttachmentController,
 };

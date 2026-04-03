@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/models/public_company_profile.dart';
 import '../../../shared/utils/external_url_opener.dart';
 import '../../../theme/app_theme.dart';
@@ -41,9 +42,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _language = widget.initialLanguageCode == 'de'
-        ? _PublicLanguage.german
-        : _PublicLanguage.english;
+    final initialCode = widget.initialLanguageCode;
+    _language = initialCode == null || initialCode.trim().isEmpty
+        ? _fromAppLanguage(ref.read(appLanguageProvider))
+        : (initialCode == 'de'
+              ? _PublicLanguage.german
+              : _PublicLanguage.english);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      ref
+          .read(appLanguageProvider.notifier)
+          .setLanguage(_toAppLanguage(_language));
+    });
   }
 
   @override
@@ -54,6 +67,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   String _text(LocalizedText value) {
     return value.resolve(_language == _PublicLanguage.german ? 'de' : 'en');
+  }
+
+  AppLanguage _toAppLanguage(_PublicLanguage language) {
+    return language == _PublicLanguage.german
+        ? AppLanguage.german
+        : AppLanguage.english;
+  }
+
+  _PublicLanguage _fromAppLanguage(AppLanguage language) {
+    return language == AppLanguage.german
+        ? _PublicLanguage.german
+        : _PublicLanguage.english;
   }
 
   Future<void> _copyText(String text, String successMessage) async {
@@ -488,6 +513,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   _routeWithLanguage('/services/$serviceKey'),
                               onLanguageChanged: (nextLanguage) {
                                 setState(() => _language = nextLanguage);
+                                ref
+                                    .read(appLanguageProvider.notifier)
+                                    .setLanguage(_toAppLanguage(nextLanguage));
                               },
                             ),
                           ),
@@ -1241,7 +1269,7 @@ class _DesktopMainNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: Color.lerp(Colors.white, AppTheme.sand, 0.72),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE8DECF)),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Wrap(
         spacing: 4,
@@ -1527,7 +1555,7 @@ class _CompactSiteMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: label,
-      color: const Color(0xFFF8F4EC),
+      color: AppTheme.shellRaised,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       onSelected: (value) {
@@ -2519,7 +2547,7 @@ class _ContentPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: const Color(0xFFE8DECF)),
+        border: Border.all(color: AppTheme.border),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: AppTheme.ink.withValues(alpha: 0.08),

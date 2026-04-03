@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/internal_chat_model.dart';
 import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/data/internal_chat_repository.dart';
+import '../../../shared/utils/external_url_opener.dart';
+import '../../../shared/utils/request_attachment_picker.dart';
 import '../../../theme/app_theme.dart';
 
 class InternalChatScreen extends ConsumerStatefulWidget {
@@ -39,11 +41,34 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
   String? _selectedThreadId;
   bool _isLoading = true;
   bool _isSendingMessage = false;
+  bool _isUploadingAttachment = false;
+  bool _isRefiningMessage = false;
   String? _errorMessage;
+
+  String _normalizeAiSuggestionForComparison(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
 
   @override
   void initState() {
     super.initState();
+    ref.listenManual<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (
+      _,
+      next,
+    ) {
+      next.whenData((event) {
+        if ((!event.affectsInternalChats && !event.affectsInternalDirectory) ||
+            !mounted) {
+          return;
+        }
+
+        unawaited(_loadChats(silent: true));
+      });
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadChats();
     });
@@ -269,6 +294,135 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     }
   }
 
+  Future<void> _uploadAttachment(InternalChatThreadModel thread) async {
+    if (_isUploadingAttachment) {
+      return;
+    }
+
+    final pickedFile = await pickRequestAttachmentFile();
+    if (pickedFile == null) {
+      return;
+    }
+
+    final caption = _composerController.text.trim();
+
+    setState(() => _isUploadingAttachment = true);
+
+    try {
+      final updatedThread = await ref
+          .read(internalChatRepositoryProvider)
+          .uploadAttachment(
+            viewerRole: widget.viewerRole,
+            threadId: thread.id,
+            bytes: pickedFile.bytes,
+            fileName: pickedFile.name,
+            mimeType: pickedFile.mimeType,
+            caption: caption,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      _composerController.clear();
+      _upsertThread(updatedThread);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingAttachment = false);
+      }
+    }
+  }
+
+  Future<void> _refineDraftWithAi(InternalChatThreadModel thread) async {
+    if (_isRefiningMessage) {
+      return;
+    }
+
+    final currentDraft = _composerController.text;
+    setState(() => _isRefiningMessage = true);
+
+    try {
+      final suggestion = await ref
+          .read(internalChatRepositoryProvider)
+          .refineReply(
+            viewerRole: widget.viewerRole,
+            threadId: thread.id,
+            draft: _composerController.text.trim(),
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      final resolvedSuggestion = suggestion.trim();
+      if (resolvedSuggestion.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Naima AI could not prepare a better reply just now.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final normalizedCurrentDraft = _normalizeAiSuggestionForComparison(
+        currentDraft,
+      );
+      final normalizedSuggestion = _normalizeAiSuggestionForComparison(
+        resolvedSuggestion,
+      );
+
+      if (normalizedCurrentDraft == normalizedSuggestion) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Naima AI reviewed the message and found no stronger rewrite.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      _composerController.value = TextEditingValue(
+        text: resolvedSuggestion,
+        selection: TextSelection.collapsed(offset: resolvedSuggestion.length),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Naima AI prepared a refined reply from the conversation.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRefiningMessage = false);
+      }
+    }
+  }
+
   Future<void> _openNewChatSheet() async {
     final result = await showModalBottomSheet<_NewChatResult>(
       context: context,
@@ -311,6 +465,26 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     }
 
     _upsertThread(result.thread);
+  }
+
+  Future<void> _openThreadProfileSheet(InternalChatThreadModel thread) async {
+    final counterpart = thread.counterpart;
+    if (counterpart == null) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        return _InternalChatUserProfileSheet(
+          user: counterpart,
+          accentColor: _accentForThread(thread),
+          presenceLabel: _threadPresenceLabel(thread),
+        );
+      },
+    );
   }
 
   int _totalUnreadCount() {
@@ -393,6 +567,16 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     final latestMessage = thread.latestMessage;
     if (latestMessage == null) {
       return 'No messages yet. Use + to start a real chat.';
+    }
+
+    if (!_hasVisibleMessageText(latestMessage) &&
+        latestMessage.attachment != null) {
+      final attachmentType =
+          _isImageAttachment(latestMessage.attachment!.mimeType)
+          ? 'image'
+          : 'file';
+      final sender = latestMessage.isOwn ? 'You' : latestMessage.senderName;
+      return '$sender shared an $attachmentType';
     }
 
     final sender = latestMessage.isOwn ? 'You' : latestMessage.senderName;
@@ -486,6 +670,45 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
       'delivered' => 'delivered',
       _ => null,
     };
+  }
+
+  bool _hasVisibleMessageText(InternalChatMessageModel message) {
+    final trimmedText = message.text.trim();
+    if (trimmedText.isEmpty) {
+      return false;
+    }
+
+    if (message.attachment == null) {
+      return true;
+    }
+
+    return trimmedText != 'Shared an attachment';
+  }
+
+  Future<void> _showAttachmentOpenError() async {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Opening files is not supported here right now.'),
+      ),
+    );
+  }
+
+  Future<void> _openAttachment(InternalChatAttachmentModel attachment) async {
+    final fileUrl = attachment.fileUrl;
+    if (fileUrl == null) {
+      return;
+    }
+
+    final opened = await openExternalUrl(fileUrl);
+    if (!mounted || opened) {
+      return;
+    }
+
+    await _showAttachmentOpenError();
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -612,11 +835,20 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
                       ? 'staff'
                       : thread.counterpart?.role,
                   text: '',
+                  attachment: null,
                   createdAt: null,
                   isOwn: false,
                   receiptStatus: null,
                 ),
           );
+    final latestPreviewText = latestMessage == null
+        ? _threadPreviewText(thread)
+        : !_hasVisibleMessageText(latestMessage) &&
+              latestMessage.attachment != null
+        ? (_isImageAttachment(latestMessage.attachment!.mimeType)
+              ? 'shared an image'
+              : 'shared a file')
+        : latestMessage.text;
 
     return InkWell(
       borderRadius: BorderRadius.circular(24),
@@ -709,8 +941,7 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
                                 ),
                           ),
                         TextSpan(
-                          text:
-                              latestMessage?.text ?? _threadPreviewText(thread),
+                          text: latestPreviewText,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: Colors.white.withValues(alpha: 0.7),
@@ -895,6 +1126,7 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     final footerColor = isOwn
         ? Colors.white.withValues(alpha: 0.82)
         : Colors.white.withValues(alpha: 0.56);
+    final hasVisibleText = _hasVisibleMessageText(message);
 
     final bubble = ConstrainedBox(
       constraints: BoxConstraints(
@@ -949,14 +1181,25 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                message.text,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white,
-                  height: 1.34,
+              if (message.attachment != null) ...<Widget>[
+                _InternalChatAttachmentTile(
+                  attachment: message.attachment!,
+                  accentColor: accentColor,
+                  isOwnMessage: isOwn,
+                  onOpen: () => _openAttachment(message.attachment!),
                 ),
-              ),
-              const SizedBox(height: 8),
+                if (hasVisibleText) const SizedBox(height: 10),
+              ],
+              if (hasVisibleText) ...<Widget>[
+                Text(
+                  message.text,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.white,
+                    height: 1.34,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               Align(
                 alignment: Alignment.centerRight,
                 child: Row(
@@ -1024,27 +1267,86 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
   }
 
   Widget _buildThreadComposer(InternalChatThreadModel thread) {
+    final isComposerBusy =
+        _isSendingMessage || _isUploadingAttachment || _isRefiningMessage;
+
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Row(
           children: <Widget>[
+            _TopRoundButton(
+              icon: _isUploadingAttachment
+                  ? Icons.hourglass_top_rounded
+                  : Icons.attach_file_rounded,
+              onPressed: isComposerBusy
+                  ? null
+                  : () => _uploadAttachment(thread),
+              backgroundColor: const Color(0xFF15181D),
+              size: 46,
+            ),
+            const SizedBox(width: 10),
             Expanded(
               child: _InputShell(
-                icon: Icons.chat_bubble_outline_rounded,
+                leading: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
+                  child: Tooltip(
+                    message: _isRefiningMessage
+                        ? 'Naima AI is refining your reply'
+                        : 'Naima AI can read this conversation and refine your reply',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: isComposerBusy
+                          ? null
+                          : () => _refineDraftWithAi(thread),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: _isRefiningMessage
+                              ? AppTheme.pine.withValues(alpha: 0.2)
+                              : AppTheme.cobalt.withValues(alpha: 0.16),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _isRefiningMessage
+                                ? AppTheme.pine.withValues(alpha: 0.44)
+                                : AppTheme.cobalt.withValues(alpha: 0.34),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          _isRefiningMessage
+                              ? Icons.hourglass_top_rounded
+                              : Icons.auto_awesome_rounded,
+                          color: _isRefiningMessage
+                              ? AppTheme.pine
+                              : AppTheme.cobalt,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 child: TextField(
                   controller: _composerController,
+                  enabled: !isComposerBusy,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     filled: false,
                     border: InputBorder.none,
-                    hintText: 'Message ${thread.displayTitle}',
+                    hintText: _isRefiningMessage
+                        ? 'Naima AI is refining your reply...'
+                        : _isUploadingAttachment
+                        ? 'Uploading attachment...'
+                        : 'Message ${thread.displayTitle}',
                     hintStyle: TextStyle(
                       color: Colors.white.withValues(alpha: 0.42),
                     ),
                   ),
-                  onSubmitted: (_) => _sendMessage(thread),
+                  onSubmitted: (_) =>
+                      isComposerBusy ? null : _sendMessage(thread),
                 ),
               ),
             ),
@@ -1053,7 +1355,7 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
               icon: _isSendingMessage
                   ? Icons.hourglass_top_rounded
                   : Icons.send_rounded,
-              onPressed: _isSendingMessage ? null : () => _sendMessage(thread),
+              onPressed: isComposerBusy ? null : () => _sendMessage(thread),
               backgroundColor: AppTheme.cobalt,
               size: 46,
             ),
@@ -1070,7 +1372,7 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
   }) {
     if (thread == null) {
       return DecoratedBox(
-        decoration: const BoxDecoration(color: Color(0xFF0D0E10)),
+        decoration: const BoxDecoration(color: AppTheme.darkPage),
         child: Center(
           child: Text(
             'Select a real admin, staff, or group chat to open the thread.',
@@ -1083,9 +1385,10 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
     }
 
     final accentColor = _accentForThread(thread);
+    final canOpenProfile = !thread.isGroup && thread.counterpart != null;
 
     return DecoratedBox(
-      decoration: const BoxDecoration(color: Color(0xFF0D0E10)),
+      decoration: const BoxDecoration(color: AppTheme.darkPage),
       child: Column(
         children: <Widget>[
           SafeArea(
@@ -1104,63 +1407,98 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
                     ),
                     const SizedBox(width: 2),
                   ],
-                  _ThreadAvatar(
-                    label: _initialsFromName(thread.displayTitle),
-                    accentColor: accentColor,
-                    size: 42,
-                    showPresenceDot: !thread.isGroup && thread.hasAnyOnline,
-                    groupOverlay: thread.isGroup,
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          thread.displayTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: canOpenProfile
+                            ? () => _openThreadProfileSheet(thread)
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              _ThreadAvatar(
+                                label: _initialsFromName(thread.displayTitle),
+                                accentColor: accentColor,
+                                size: 42,
+                                showPresenceDot:
+                                    !thread.isGroup && thread.hasAnyOnline,
+                                groupOverlay: thread.isGroup,
                               ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          thread.isGroup
-                              ? thread.participantNamesLabel
-                              : '${thread.secondaryLabel} chat',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.58),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      thread.displayTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge
+                                          ?.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      thread.isGroup
+                                          ? thread.participantNamesLabel
+                                          : '${thread.secondaryLabel} chat',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.58,
+                                            ),
+                                          ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: <Widget>[
+                                        _MetaChip(
+                                          label: _threadPresenceLabel(thread),
+                                          accent: thread.hasAnyOnline
+                                              ? AppTheme.pine
+                                              : Colors.white54,
+                                          icon: thread.hasAnyOnline
+                                              ? Icons.circle
+                                              : Icons
+                                                    .radio_button_unchecked_rounded,
+                                        ),
+                                        if (thread.isGroup)
+                                          _MetaChip(
+                                            label: thread.secondaryLabel,
+                                            accent: accentColor,
+                                            icon: Icons.groups_rounded,
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
+                              if (canOpenProfile)
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: Colors.white.withValues(alpha: 0.5),
+                                  size: 22,
+                                ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            _MetaChip(
-                              label: _threadPresenceLabel(thread),
-                              accent: thread.hasAnyOnline
-                                  ? AppTheme.pine
-                                  : Colors.white54,
-                              icon: thread.hasAnyOnline
-                                  ? Icons.circle
-                                  : Icons.radio_button_unchecked_rounded,
-                            ),
-                            if (thread.isGroup)
-                              _MetaChip(
-                                label: thread.secondaryLabel,
-                                accent: accentColor,
-                                icon: Icons.groups_rounded,
-                              ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ],
@@ -1174,9 +1512,9 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: <Color>[
-                    const Color(0xFF111214),
+                    AppTheme.darkSurface,
                     accentColor.withValues(alpha: 0.08),
-                    const Color(0xFF0D0E10),
+                    AppTheme.darkPage,
                   ],
                 ),
               ),
@@ -1256,16 +1594,6 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
-      next.whenData((event) {
-        if (!event.affectsInternalChats && !event.affectsInternalDirectory) {
-          return;
-        }
-
-        unawaited(_loadChats(silent: true));
-      });
-    });
-
     final visibleThreads = _visibleThreads();
 
     return LayoutBuilder(
@@ -1318,6 +1646,280 @@ class _InternalChatScreenState extends ConsumerState<InternalChatScreen> {
 
         return _buildThreadListPanel(context, visibleThreads, selectedThread);
       },
+    );
+  }
+}
+
+class _InternalChatUserProfileSheet extends StatelessWidget {
+  const _InternalChatUserProfileSheet({
+    required this.user,
+    required this.accentColor,
+    required this.presenceLabel,
+  });
+
+  final InternalChatUserModel user;
+  final Color accentColor;
+  final String presenceLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final phoneText = (user.phone ?? '').trim();
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AppTheme.darkPage,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            top: 16,
+            right: 16,
+            bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: <Widget>[
+                  _ThreadAvatar(
+                    label: _profileInitials(user),
+                    accentColor: accentColor,
+                    size: 56,
+                    showPresenceDot: user.isOnline,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          user.fullName,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${user.roleLabel} profile',
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.62),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  _MetaChip(
+                    label: presenceLabel,
+                    accent: user.isOnline ? AppTheme.pine : Colors.white54,
+                    icon: user.isOnline
+                        ? Icons.circle
+                        : Icons.radio_button_unchecked_rounded,
+                  ),
+                  _MetaChip(
+                    label: user.status == 'active'
+                        ? 'Active account'
+                        : user.status,
+                    accent: user.status == 'active'
+                        ? AppTheme.cobalt
+                        : const Color(0xFFFFC38B),
+                    icon: Icons.verified_user_outlined,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _ProfileSheetCard(
+                title: 'Contact',
+                child: Column(
+                  children: <Widget>[
+                    _ProfileSheetRow(
+                      icon: Icons.mail_outline_rounded,
+                      label: 'Email',
+                      value: user.email,
+                    ),
+                    const SizedBox(height: 12),
+                    _ProfileSheetRow(
+                      icon: Icons.call_outlined,
+                      label: 'Phone',
+                      value: phoneText.isEmpty ? 'Not provided yet' : phoneText,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              _ProfileSheetCard(
+                title: 'Account',
+                child: Column(
+                  children: <Widget>[
+                    _ProfileSheetRow(
+                      icon: Icons.badge_outlined,
+                      label: 'Role',
+                      value: user.roleLabel,
+                    ),
+                    const SizedBox(height: 12),
+                    _ProfileSheetRow(
+                      icon: Icons.circle_outlined,
+                      label: 'Availability',
+                      value: user.staffAvailability == 'online'
+                          ? 'Online'
+                          : 'Offline',
+                    ),
+                    const SizedBox(height: 12),
+                    _ProfileSheetRow(
+                      icon: Icons.fingerprint_rounded,
+                      label: 'User ID',
+                      value: user.id,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _profileInitials(InternalChatUserModel user) {
+    final first = user.firstName.trim();
+    final last = user.lastName.trim();
+
+    if (first.isNotEmpty && last.isNotEmpty) {
+      return '${first[0]}${last[0]}'.toUpperCase();
+    }
+
+    final parts = user.fullName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+
+    if (parts.isEmpty) {
+      return '?';
+    }
+
+    if (parts.length == 1) {
+      return parts.first.substring(0, 1).toUpperCase();
+    }
+
+    return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'
+        .toUpperCase();
+  }
+}
+
+class _ProfileSheetCard extends StatelessWidget {
+  const _ProfileSheetCard({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF171A20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileSheetRow extends StatelessWidget {
+  const _ProfileSheetRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(
+            icon,
+            color: Colors.white.withValues(alpha: 0.42),
+            size: 18,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.54),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1536,7 +2138,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
 
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: Color(0xFF0D0E10),
+        color: AppTheme.darkPage,
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
       ),
       child: SafeArea(
@@ -1851,13 +2453,15 @@ class _NewChatSheetState extends State<_NewChatSheet> {
 
 class _InputShell extends StatelessWidget {
   const _InputShell({
-    required this.icon,
     required this.child,
+    this.icon,
+    this.leading,
     this.minHeight = 56,
     this.alignTop = false,
-  });
+  }) : assert(icon != null || leading != null);
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? leading;
   final Widget child;
   final double minHeight;
   final bool alignTop;
@@ -1883,14 +2487,17 @@ class _InputShell extends StatelessWidget {
             ? CrossAxisAlignment.start
             : CrossAxisAlignment.center,
         children: <Widget>[
-          Padding(
-            padding: EdgeInsets.fromLTRB(14, alignTop ? 15 : 0, 10, 0),
-            child: Icon(
-              icon,
-              color: Colors.white.withValues(alpha: 0.42),
-              size: 20,
+          if (leading != null)
+            leading!
+          else
+            Padding(
+              padding: EdgeInsets.fromLTRB(14, alignTop ? 15 : 0, 10, 0),
+              child: Icon(
+                icon,
+                color: Colors.white.withValues(alpha: 0.42),
+                size: 20,
+              ),
             ),
-          ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(right: 14),
@@ -2109,4 +2716,294 @@ class _InternalChatErrorState extends StatelessWidget {
       ),
     );
   }
+}
+
+class _InternalChatAttachmentTile extends StatelessWidget {
+  const _InternalChatAttachmentTile({
+    required this.attachment,
+    required this.accentColor,
+    required this.isOwnMessage,
+    required this.onOpen,
+  });
+
+  final InternalChatAttachmentModel attachment;
+  final Color accentColor;
+  final bool isOwnMessage;
+  final Future<void> Function() onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final tileColor = isOwnMessage
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.16);
+    final borderColor = isOwnMessage
+        ? Colors.white.withValues(alpha: 0.12)
+        : accentColor.withValues(alpha: 0.18);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onOpen,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: tileColor,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (_isImageAttachment(attachment.mimeType))
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(18),
+                  ),
+                  child: SizedBox(
+                    height: 160,
+                    child: _InternalChatAttachmentPreview(
+                      attachment: attachment,
+                      accentColor: accentColor,
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    if (!_isImageAttachment(attachment.mimeType)) ...<Widget>[
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: isOwnMessage
+                              ? Colors.white.withValues(alpha: 0.14)
+                              : accentColor.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            _attachmentIconFor(attachment.mimeType),
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            attachment.originalName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${_attachmentTypeLabelFor(attachment.mimeType)} · ${_formatBytes(attachment.sizeBytes)}',
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.74),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Icon(
+                      Icons.open_in_new_rounded,
+                      size: 18,
+                      color: Colors.white.withValues(alpha: 0.78),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InternalChatAttachmentPreview extends StatelessWidget {
+  const _InternalChatAttachmentPreview({
+    required this.attachment,
+    required this.accentColor,
+  });
+
+  final InternalChatAttachmentModel attachment;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final fileUrl = attachment.fileUrl;
+    if (_isImageAttachment(attachment.mimeType) && fileUrl != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Image.network(
+            fileUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _InternalChatAttachmentPreviewFallback(
+              attachment: attachment,
+              accentColor: accentColor,
+            ),
+            loadingBuilder:
+                (
+                  BuildContext context,
+                  Widget child,
+                  ImageChunkEvent? loadingProgress,
+                ) {
+                  if (loadingProgress == null) {
+                    return child;
+                  }
+
+                  return _InternalChatAttachmentPreviewFallback(
+                    attachment: attachment,
+                    accentColor: accentColor,
+                  );
+                },
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.28),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _InternalChatAttachmentPreviewFallback(
+      attachment: attachment,
+      accentColor: accentColor,
+    );
+  }
+}
+
+class _InternalChatAttachmentPreviewFallback extends StatelessWidget {
+  const _InternalChatAttachmentPreviewFallback({
+    required this.attachment,
+    required this.accentColor,
+  });
+
+  final InternalChatAttachmentModel attachment;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[
+            accentColor.withValues(alpha: 0.22),
+            Colors.black.withValues(alpha: 0.16),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              _attachmentIconFor(attachment.mimeType),
+              size: 30,
+              color: Colors.white,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _attachmentTypeLabelFor(attachment.mimeType),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _formatBytes(attachment.sizeBytes),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+IconData _attachmentIconFor(String mimeType) {
+  if (mimeType.startsWith('image/')) {
+    return Icons.image_rounded;
+  }
+
+  if (mimeType.contains('pdf')) {
+    return Icons.picture_as_pdf_rounded;
+  }
+
+  if (mimeType.contains('word') || mimeType.contains('document')) {
+    return Icons.description_rounded;
+  }
+
+  if (mimeType.startsWith('text/')) {
+    return Icons.notes_rounded;
+  }
+
+  return Icons.attach_file_rounded;
+}
+
+bool _isImageAttachment(String mimeType) {
+  return mimeType.startsWith('image/');
+}
+
+String _attachmentTypeLabelFor(String mimeType) {
+  if (mimeType.startsWith('image/')) {
+    return 'Image';
+  }
+
+  if (mimeType.contains('pdf')) {
+    return 'PDF';
+  }
+
+  if (mimeType.contains('word') || mimeType.contains('document')) {
+    return 'Document';
+  }
+
+  if (mimeType.startsWith('text/')) {
+    return 'Text';
+  }
+
+  return 'File';
+}
+
+String _formatBytes(int value) {
+  if (value >= 1024 * 1024) {
+    return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  if (value >= 1024) {
+    return '${(value / 1024).toStringAsFixed(1)} KB';
+  }
+
+  return '$value B';
 }

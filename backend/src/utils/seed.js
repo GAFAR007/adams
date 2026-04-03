@@ -1,7 +1,7 @@
 /**
- * WHAT: Seeds MongoDB with the public company profile, one admin, three active staff accounts, and one pending staff invite.
- * WHY: The first frontend, homepage, and staff-management flows need predictable data without demo customers or old queue history.
- * HOW: Reset the small v1 collections, seed the company profile, hash seed passwords from env, and create the clean admin/staff dataset.
+ * WHAT: Seeds MongoDB with the public company profile, one admin, one active customer, six active staff accounts, and one pending staff invite.
+ * WHY: The first frontend, homepage, and staff-management flows need predictable data with one demo customer, but without old requests or stale history records.
+ * HOW: Reset the small v1 collections, clear request/history records, hash seed passwords from env, and create the clean admin/staff dataset with typed workforce roles.
  */
 
 const bcrypt = require("bcryptjs");
@@ -16,6 +16,7 @@ const {
   REQUEST_SOURCES,
   REQUEST_STATUSES,
   STAFF_AVAILABILITIES,
+  STAFF_TYPES,
   USER_ROLES,
   USER_STATUSES,
 } = require("../constants/app.constants");
@@ -60,7 +61,7 @@ async function runSeed() {
     userRole: "system",
   });
 
-  // WHY: Reset only the small v1 collections so the seeded relationships stay consistent for development.
+  // WHY: Clear previous requests, internal chat history, sessions, invites, and users so each seed starts from a clean operational state.
   await Promise.all([
     CompanyProfile.deleteMany({}),
     CustomerRegistrationVerification.deleteMany({}),
@@ -281,6 +282,7 @@ async function runSeed() {
   const [
     adminPasswordHash,
     staffPasswordHash,
+    customerPasswordHash,
   ] = await Promise.all([
     bcrypt.hash(
       env.seedAdminPassword,
@@ -288,6 +290,10 @@ async function runSeed() {
     ),
     bcrypt.hash(
       env.seedStaffPassword,
+      12,
+    ),
+    bcrypt.hash(
+      env.seedCustomerPassword,
       12,
     ),
   ]);
@@ -303,15 +309,39 @@ async function runSeed() {
     passwordHash: adminPasswordHash,
   });
 
-  // WHY: Seed active staff accounts so assignment flows and staff dashboards are testable immediately.
+  // WHY: Keep one ready-to-login customer account in the dataset so customer request, chat, and calendar flows can be exercised immediately.
+  await User.create({
+    firstName: "Fatima",
+    lastName: "Kaya",
+    email: "customer1@adams.local",
+    phone: "+496666666661",
+    role: USER_ROLES.CUSTOMER,
+    status: USER_STATUSES.ACTIVE,
+    passwordHash: customerPasswordHash,
+  });
+
+  // WHY: Seed customer-care, technician, and contractor accounts so front-office, estimation, assignment, and role filters can be exercised immediately.
   const staffMembers =
     await User.insertMany([
+      {
+        firstName: "Amina",
+        lastName: "Yilmaz",
+        email: "care1@adams.local",
+        phone: "+492111111111",
+        role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.CUSTOMER_CARE,
+        status: USER_STATUSES.ACTIVE,
+        staffAvailability:
+          STAFF_AVAILABILITIES.ONLINE,
+        passwordHash: staffPasswordHash,
+      },
       {
         firstName: "Daniel",
         lastName: "Weber",
         email: "staff1@adams.local",
         phone: "+492222222222",
         role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.TECHNICIAN,
         status: USER_STATUSES.ACTIVE,
         staffAvailability:
           STAFF_AVAILABILITIES.ONLINE,
@@ -323,6 +353,7 @@ async function runSeed() {
         email: "staff2@adams.local",
         phone: "+493333333333",
         role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.CONTRACTOR,
         status: USER_STATUSES.ACTIVE,
         staffAvailability:
           STAFF_AVAILABILITIES.OFFLINE,
@@ -334,6 +365,31 @@ async function runSeed() {
         email: "staff3@adams.local",
         phone: "+494444444444",
         role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.TECHNICIAN,
+        status: USER_STATUSES.ACTIVE,
+        staffAvailability:
+          STAFF_AVAILABILITIES.ONLINE,
+        passwordHash: staffPasswordHash,
+      },
+      {
+        firstName: "Leonie",
+        lastName: "Brandt",
+        email: "staff4@adams.local",
+        phone: "+495555555551",
+        role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.TECHNICIAN,
+        status: USER_STATUSES.ACTIVE,
+        staffAvailability:
+          STAFF_AVAILABILITIES.OFFLINE,
+        passwordHash: staffPasswordHash,
+      },
+      {
+        firstName: "Marek",
+        lastName: "Nowak",
+        email: "staff5@adams.local",
+        phone: "+495555555552",
+        role: USER_ROLES.STAFF,
+        staffType: STAFF_TYPES.CONTRACTOR,
         status: USER_STATUSES.ACTIVE,
         staffAvailability:
           STAFF_AVAILABILITIES.ONLINE,
@@ -348,6 +404,7 @@ async function runSeed() {
     lastName: "Schneider",
     email: "pending.staff@adams.local",
     phone: "+495555555555",
+    staffType: STAFF_TYPES.CONTRACTOR,
     invitedBy: admin._id,
     expiresAt: new Date(
       Date.now() +

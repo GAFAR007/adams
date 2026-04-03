@@ -8,6 +8,40 @@ const mongoose = require('mongoose');
 
 const { USER_ROLES } = require('../constants/app.constants');
 
+const internalChatAttachmentSchema = new mongoose.Schema(
+  {
+    originalName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    storedName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    mimeType: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    sizeBytes: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    relativeUrl: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+  },
+  {
+    _id: false,
+    id: false,
+  },
+);
+
 const internalChatMessageSchema = new mongoose.Schema(
   {
     sender: {
@@ -29,6 +63,10 @@ const internalChatMessageSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+    attachment: {
+      type: internalChatAttachmentSchema,
+      default: null,
     },
     createdAt: {
       type: Date,

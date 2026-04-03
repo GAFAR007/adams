@@ -11,6 +11,17 @@ import '../../../core/models/service_request_model.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/domain/auth_session.dart';
 
+Map<String, dynamic> _compactJson(Map<String, dynamic> values) {
+  return Map<String, dynamic>.fromEntries(
+    values.entries
+        .where((entry) => entry.value != null)
+        .map(
+          (entry) =>
+              MapEntry<String, dynamic>(entry.key, entry.value as dynamic),
+        ),
+  );
+}
+
 final staffRepositoryProvider = Provider<StaffRepository>((ref) {
   return StaffRepository(ref.read(apiClientProvider));
 });
@@ -80,6 +91,21 @@ class StaffRepository {
     return StaffDashboardBundle.fromJson(response);
   }
 
+  Future<List<ServiceRequestModel>> fetchCalendarRequests({
+    required String start,
+    required String end,
+  }) async {
+    final response = await _client.getJson(
+      '/staff/calendar',
+      queryParameters: <String, dynamic>{'start': start, 'end': end},
+    );
+
+    return (response['requests'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map(ServiceRequestModel.fromJson)
+        .toList();
+  }
+
   Future<void> updateAvailability({required String availability}) async {
     // WHY: Staff availability is a tiny state change, so the dashboard can simply refetch after the backend confirms it.
     await _client.patchJson(
@@ -109,6 +135,55 @@ class StaffRepository {
     );
   }
 
+  Future<ServiceRequestModel> submitEstimation({
+    required String requestId,
+    String? assessmentType,
+    String? assessmentStatus,
+    String? stage,
+    String? siteReviewDate,
+    String? siteReviewStartTime,
+    String? siteReviewEndTime,
+    double? siteReviewCost,
+    String? siteReviewNotes,
+    String? estimatedStartDate,
+    String? estimatedEndDate,
+    double? cost,
+    double? estimatedHoursPerDay,
+    List<Map<String, dynamic>>? estimatedDailySchedule,
+    double? estimatedHours,
+    int? estimatedDays,
+    String? note,
+    String? inspectionNote,
+  }) async {
+    final response = await _client.postJson(
+      '/staff/requests/$requestId/estimations',
+      data: _compactJson(<String, dynamic>{
+        'assessmentType': assessmentType,
+        'assessmentStatus': assessmentStatus,
+        'stage': stage,
+        'siteReviewDate': siteReviewDate,
+        'siteReviewStartTime': siteReviewStartTime,
+        'siteReviewEndTime': siteReviewEndTime,
+        'siteReviewCost': siteReviewCost,
+        'siteReviewNotes': siteReviewNotes,
+        'estimatedStartDate': estimatedStartDate,
+        'estimatedEndDate': estimatedEndDate,
+        'cost': cost,
+        'estimatedHoursPerDay': estimatedHoursPerDay,
+        'estimatedHours': estimatedHours,
+        'estimatedDays': estimatedDays,
+        'estimatedDailySchedule': estimatedDailySchedule,
+        'note': note,
+        'inspectionNote': inspectionNote,
+      }),
+    );
+
+    // WHY: Returning the updated request lets the active thread patch in the new system message immediately.
+    return ServiceRequestModel.fromJson(
+      response['request'] as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
+  }
+
   Future<void> sendMessage({
     required String requestId,
     required String message,
@@ -118,6 +193,20 @@ class StaffRepository {
       '/staff/requests/$requestId/messages',
       data: <String, dynamic>{'message': message, 'actionType': actionType},
     );
+  }
+
+  Future<String> refineReply({
+    required String requestId,
+    required String draft,
+  }) async {
+    final response = await _client.postJson(
+      '/staff/requests/$requestId/reply-assistant',
+      data: <String, dynamic>{'draft': draft},
+    );
+
+    return response['assistant'] is Map<String, dynamic>
+        ? (response['assistant']['suggestion'] as String? ?? '')
+        : '';
   }
 
   Future<void> uploadRequestAttachment({
@@ -153,24 +242,23 @@ class StaffRepository {
     );
   }
 
-  Future<void> sendInvoice({
+  Future<ServiceRequestModel> clockRequestWork({
     required String requestId,
-    required double amount,
-    required String dueDate,
-    required String paymentMethod,
-    required String paymentInstructions,
+    required String action,
     String? note,
   }) async {
-    await _client.postJson(
-      '/staff/requests/$requestId/invoice',
-      data: <String, dynamic>{
-        'amount': amount,
-        'dueDate': dueDate,
-        'paymentMethod': paymentMethod,
-        'paymentInstructions': paymentInstructions,
-        'note': note,
-      },
+    final response = await _client.postJson(
+      '/staff/requests/$requestId/work-log',
+      data: <String, dynamic>{'action': action, 'note': note},
     );
+
+    return ServiceRequestModel.fromJson(
+      response['request'] as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
+  }
+
+  Future<void> sendQuotation({required String requestId}) async {
+    await _client.postJson('/staff/requests/$requestId/invoice');
   }
 
   Future<void> reviewPaymentProof({
@@ -182,5 +270,9 @@ class StaffRepository {
       '/staff/requests/$requestId/invoice/proof/review',
       data: <String, dynamic>{'decision': decision, 'reviewNote': reviewNote},
     );
+  }
+
+  Future<void> unlockPaymentProofUpload({required String requestId}) async {
+    await _client.patchJson('/staff/requests/$requestId/invoice/proof/unlock');
   }
 }

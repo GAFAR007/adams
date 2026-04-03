@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/service_request_model.dart';
 import '../../../core/network/api_client.dart';
+import '../../../shared/utils/request_attachment_picker_types.dart';
 
 final customerRepositoryProvider = Provider<CustomerRepository>((ref) {
   return CustomerRepository(ref.read(apiClientProvider));
@@ -35,6 +36,15 @@ class CustomerRepository {
     }
     if (lowerCaseFileName.endsWith('.webp')) {
       return 'image/webp';
+    }
+    if (lowerCaseFileName.endsWith('.mp4')) {
+      return 'video/mp4';
+    }
+    if (lowerCaseFileName.endsWith('.mov')) {
+      return 'video/quicktime';
+    }
+    if (lowerCaseFileName.endsWith('.webm')) {
+      return 'video/webm';
     }
     if (lowerCaseFileName.endsWith('.pdf')) {
       return 'application/pdf';
@@ -73,18 +83,38 @@ class CustomerRepository {
     required String preferredDate,
     required String preferredTimeWindow,
     required String message,
+    required String accessMethod,
+    required String arrivalContactName,
+    required String arrivalContactPhone,
+    required String accessNotes,
+    required List<PickedRequestAttachmentFile> mediaFiles,
   }) async {
-    final response = await _client.postJson(
+    final response = await _client.postFormData(
       '/customer/requests',
-      data: <String, dynamic>{
+      createData: () => FormData.fromMap(<String, dynamic>{
         'serviceType': serviceType,
         'addressLine1': addressLine1,
         'city': city,
         'postalCode': postalCode,
-        'preferredDate': preferredDate.isEmpty ? null : preferredDate,
+        'preferredDate': preferredDate.isEmpty ? '' : preferredDate,
         'preferredTimeWindow': preferredTimeWindow,
         'message': message,
-      },
+        'accessMethod': accessMethod,
+        'arrivalContactName': arrivalContactName,
+        'arrivalContactPhone': arrivalContactPhone,
+        'accessNotes': accessNotes,
+        'media': mediaFiles
+            .map(
+              (file) => MultipartFile.fromBytes(
+                file.bytes,
+                filename: file.name,
+                contentType: DioMediaType.parse(
+                  _normalizedUploadMimeType(file.name, file.mimeType),
+                ),
+              ),
+            )
+            .toList(growable: false),
+      }),
     );
 
     return ServiceRequestModel.fromJson(
@@ -135,6 +165,10 @@ class CustomerRepository {
     required String preferredDate,
     required String preferredTimeWindow,
     required String message,
+    required String accessMethod,
+    required String arrivalContactName,
+    required String arrivalContactPhone,
+    required String accessNotes,
   }) async {
     await _client.patchJson(
       '/customer/requests/$requestId',
@@ -146,6 +180,10 @@ class CustomerRepository {
         'preferredDate': preferredDate.isEmpty ? null : preferredDate,
         'preferredTimeWindow': preferredTimeWindow,
         'message': message,
+        'accessMethod': accessMethod,
+        'arrivalContactName': arrivalContactName,
+        'arrivalContactPhone': arrivalContactPhone,
+        'accessNotes': accessNotes,
       },
     );
   }
@@ -158,6 +196,20 @@ class CustomerRepository {
       '/customer/requests/$requestId/messages',
       data: <String, dynamic>{'message': message},
     );
+  }
+
+  Future<String> refineReply({
+    required String requestId,
+    required String draft,
+  }) async {
+    final response = await _client.postJson(
+      '/customer/requests/$requestId/reply-assistant',
+      data: <String, dynamic>{'draft': draft},
+    );
+
+    return response['assistant'] is Map<String, dynamic>
+        ? (response['assistant']['suggestion'] as String? ?? '')
+        : '';
   }
 
   Future<void> uploadRequestAttachment({

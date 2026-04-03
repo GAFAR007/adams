@@ -28,6 +28,22 @@ const adminDashboardController = asyncHandler(async (req, res) => {
   });
 });
 
+const adminCalendarController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminGetCalendar',
+    intent: 'Fetch shared calendar jobs for the admin planning view',
+  });
+
+  const result = await adminService.listCalendarRequests(req.query, logContext);
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const adminListRequestsController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -63,11 +79,33 @@ const adminAssignRequestController = asyncHandler(async (req, res) => {
   });
 });
 
+const adminSelectRequestEstimationController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminSelectRequestEstimation',
+    intent: 'Select a staff estimate to drive quotation and reserved scheduling',
+  });
+
+  const result = await adminService.selectRequestEstimation(
+    req.authUser,
+    req.params.requestId,
+    req.body.estimationId,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const adminCreateRequestInvoiceController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
     operation: 'AdminCreateRequestInvoice',
-    intent: 'Send an invoice and payment instructions from the admin request workspace',
+    intent: 'Save the internal quote review package from the admin request workspace',
   });
 
   const result = await adminService.createRequestInvoice(
@@ -224,6 +262,7 @@ const adminListStaffInvitesController = asyncHandler(async (req, res) => {
 
 module.exports = {
   adminAssignRequestController,
+  adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
   adminDeleteStaffInviteController,
@@ -233,5 +272,6 @@ module.exports = {
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminSelectRequestEstimationController,
   adminUploadRequestAttachmentController,
 };

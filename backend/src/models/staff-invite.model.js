@@ -6,6 +6,8 @@
 
 const mongoose = require('mongoose');
 
+const { STAFF_TYPES } = require('../constants/app.constants');
+
 const staffInviteSchema = new mongoose.Schema(
   {
     inviteId: {
@@ -34,6 +36,12 @@ const staffInviteSchema = new mongoose.Schema(
       type: String,
       default: '',
       trim: true,
+    },
+    staffType: {
+      // WHY: Invites must preserve whether the future account is customer care, technician, or contractor.
+      type: String,
+      enum: Object.values(STAFF_TYPES),
+      default: STAFF_TYPES.TECHNICIAN,
     },
     invitedBy: {
       type: mongoose.Schema.Types.ObjectId,

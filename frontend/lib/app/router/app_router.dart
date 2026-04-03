@@ -14,6 +14,7 @@ import '../features/auth/presentation/customer_login_screen.dart';
 import '../features/auth/presentation/staff_login_screen.dart';
 import '../features/auth/presentation/staff_register_screen.dart';
 import '../features/customer/presentation/customer_create_request_screen.dart';
+import '../features/customer/presentation/customer_quotation_screen.dart';
 import '../features/customer/presentation/customer_requests_screen.dart';
 import '../features/public/presentation/home_screen.dart';
 import '../features/public/presentation/public_about_screen.dart';
@@ -23,6 +24,8 @@ import '../features/public/presentation/public_legal_screen.dart';
 import '../features/public/presentation/public_service_detail_screen.dart';
 import '../features/public/presentation/public_services_screen.dart';
 import '../features/staff/presentation/staff_dashboard_screen.dart';
+import '../shared/presentation/workspace_calendar_screen.dart';
+import '../shared/presentation/workspace_profile_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authControllerProvider);
@@ -31,10 +34,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     redirect: (BuildContext context, GoRouterState state) {
       final location = state.matchedLocation;
-      final isAdminProtected = location == '/admin';
-      final isStaffProtected = location == '/staff';
+      final isAdminProtected =
+          location == '/admin' || location == '/admin/calendar';
+      final isAdminProfileRoute = location == '/admin/profile';
+      final isStaffProtected =
+          location == '/staff' || location == '/staff/calendar';
+      final isStaffProfileRoute = location == '/staff/profile';
+      final isCustomerProfileRoute = location == '/app/profile';
       final isCustomerProtected =
           location == '/app/requests' ||
+          location == '/app/calendar' ||
+          isCustomerProfileRoute ||
           location == '/app/requests/new' ||
           location.startsWith('/app/requests/');
       final isPublicAuthRoute =
@@ -67,7 +77,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return _homeForRole(authState.role);
       }
 
-      if (isAdminProtected) {
+      if (isAdminProtected || isAdminProfileRoute) {
         if (!authState.isAuthenticated) {
           return '/admin/login';
         }
@@ -77,7 +87,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         }
       }
 
-      if (isStaffProtected) {
+      if (isStaffProtected || isStaffProfileRoute) {
         if (!authState.isAuthenticated) {
           return '/staff/login';
         }
@@ -216,6 +226,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             const CustomerRequestsScreen(),
       ),
       GoRoute(
+        path: '/app/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.customer),
+      ),
+      GoRoute(
+        path: '/app/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(
+              scope: WorkspaceCalendarScope.customer,
+            ),
+      ),
+      GoRoute(
         path: '/app/requests/new',
         builder: (BuildContext context, GoRouterState state) =>
             CustomerCreateRequestScreen(
@@ -230,14 +252,41 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ),
       ),
       GoRoute(
+        path: '/app/requests/:requestId/quotation',
+        builder: (BuildContext context, GoRouterState state) =>
+            CustomerQuotationScreen(
+              requestId: state.pathParameters['requestId'] ?? '',
+            ),
+      ),
+      GoRoute(
         path: '/admin',
         builder: (BuildContext context, GoRouterState state) =>
             const AdminDashboardScreen(),
       ),
       GoRoute(
+        path: '/admin/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.admin),
+      ),
+      GoRoute(
+        path: '/admin/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(scope: WorkspaceCalendarScope.admin),
+      ),
+      GoRoute(
         path: '/staff',
         builder: (BuildContext context, GoRouterState state) =>
             const StaffDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/staff/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.staff),
+      ),
+      GoRoute(
+        path: '/staff/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(scope: WorkspaceCalendarScope.staff),
       ),
     ],
   );

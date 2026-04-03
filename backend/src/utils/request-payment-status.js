@@ -6,10 +6,15 @@
 
 const {
   PAYMENT_REQUEST_STATUSES,
+  REQUEST_REVIEW_KINDS,
   REQUEST_STATUSES,
 } = require('../constants/app.constants');
 const { syncHostedPaymentSession } = require('./payment-provider');
-const { issuePaymentReceipt } = require('./payment-receipt');
+const {
+  CURRENT_RECEIPT_TEMPLATE_VERSION,
+  issuePaymentReceipt,
+  localReceiptExists,
+} = require('./payment-receipt');
 const {
   buildReceiptIssuedMessage,
   invoiceNeedsOnlinePayment,
@@ -19,15 +24,27 @@ const { buildSystemMessage } = require('./request-chat');
 async function issueReceiptIfMissing(request) {
   const invoice = request?.invoice;
   if (!invoice) {
-    return false;
+    return {
+      changed: false,
+      newlyIssued: false,
+    };
   }
 
-  if (
+  const hasStoredReceipt =
     invoice.receiptNumber &&
     invoice.receiptRelativeUrl &&
-    invoice.receiptIssuedAt
-  ) {
-    return false;
+    invoice.receiptIssuedAt;
+  const hasCurrentTemplate =
+    Number(invoice.receiptTemplateVersion || 0) >=
+    CURRENT_RECEIPT_TEMPLATE_VERSION;
+  const localFileAvailable =
+    !invoice.receiptRelativeUrl || localReceiptExists(invoice.receiptRelativeUrl);
+
+  if (hasStoredReceipt && hasCurrentTemplate && localFileAvailable) {
+    return {
+      changed: false,
+      newlyIssued: false,
+    };
   }
 
   const issuedReceipt = await issuePaymentReceipt({
@@ -37,7 +54,11 @@ async function issueReceiptIfMissing(request) {
   invoice.receiptNumber = issuedReceipt.receiptNumber;
   invoice.receiptRelativeUrl = issuedReceipt.receiptRelativeUrl;
   invoice.receiptIssuedAt = issuedReceipt.receiptIssuedAt;
-  return true;
+  invoice.receiptTemplateVersion = issuedReceipt.receiptTemplateVersion;
+  return {
+    changed: true,
+    newlyIssued: !hasStoredReceipt,
+  };
 }
 
 async function finalizeApprovedInvoice(request, { appendMessage = true } = {}) {
@@ -52,22 +73,36 @@ async function finalizeApprovedInvoice(request, { appendMessage = true } = {}) {
     changed = true;
   }
 
-  if (request.status !== REQUEST_STATUSES.CLOSED) {
+  if (
+    invoice.kind === REQUEST_REVIEW_KINDS.QUOTATION &&
+    request.status !== REQUEST_STATUSES.CLOSED
+  ) {
     if (request.status !== REQUEST_STATUSES.PENDING_START) {
       request.status = REQUEST_STATUSES.PENDING_START;
       changed = true;
     }
   }
 
-  if (await issueReceiptIfMissing(request)) {
+  const receiptSync = await issueReceiptIfMissing(request);
+  if (receiptSync.changed) {
     changed = true;
   }
 
-  if (changed && appendMessage) {
+  if (changed && appendMessage && receiptSync.newlyIssued) {
     request.messages.push(buildSystemMessage(buildReceiptIssuedMessage(invoice)));
   }
 
   return changed;
+}
+
+async function syncApprovedInvoiceReceiptIfNeeded(request) {
+  const invoice = request?.invoice;
+  if (!invoice || invoice.status !== PAYMENT_REQUEST_STATUSES.APPROVED) {
+    return false;
+  }
+
+  const receiptSync = await issueReceiptIfMissing(request);
+  return receiptSync.changed;
 }
 
 async function syncOnlineInvoicePaymentIfNeeded(
@@ -113,5 +148,6 @@ async function syncOnlineInvoicePaymentIfNeeded(
 module.exports = {
   finalizeApprovedInvoice,
   issueReceiptIfMissing,
+  syncApprovedInvoiceReceiptIfNeeded,
   syncOnlineInvoicePaymentIfNeeded,
 };

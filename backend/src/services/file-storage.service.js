@@ -29,6 +29,11 @@ const STORAGE_TARGETS = Object.freeze({
     localDirectory: 'request-attachments',
     operation: 'StoreRequestAttachmentFile',
   },
+  INTERNAL_CHAT_ATTACHMENTS: {
+    cloudinaryFolder: 'adams/internal-chat-attachments',
+    localDirectory: 'internal-chat-attachments',
+    operation: 'StoreInternalChatAttachmentFile',
+  },
 });
 
 function cloudinaryEnabled() {
@@ -256,9 +261,14 @@ async function storeRequestAttachmentFile(file, logContext) {
   return storeFile(file, STORAGE_TARGETS.REQUEST_ATTACHMENTS, logContext);
 }
 
+async function storeInternalChatAttachmentFile(file, logContext) {
+  return storeFile(file, STORAGE_TARGETS.INTERNAL_CHAT_ATTACHMENTS, logContext);
+}
+
 module.exports = {
   getFileStorageStatus,
   logFileStorageStatus,
+  storeInternalChatAttachmentFile,
   storePaymentProofFile,
   storeRequestAttachmentFile,
 };

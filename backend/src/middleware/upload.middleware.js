@@ -26,6 +26,17 @@ const requestAttachmentMimeTypes = new Set([
   'image/png',
   'image/webp',
   'text/plain',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+]);
+const requestIntakeMimeTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
 ]);
 
 function createUpload({
@@ -120,6 +131,60 @@ function buildUploadMiddleware({
   };
 }
 
+function buildArrayUploadMiddleware({
+  upload,
+  fieldName,
+  maxCount,
+  tooLargeMessage,
+  tooLargeErrorCode,
+  tooLargeResolutionHint,
+  uploadFailedMessage,
+  uploadFailedErrorCode,
+  uploadFailedResolutionHint,
+}) {
+  return (req, res, next) => {
+    upload.array(fieldName, maxCount)(req, res, (error) => {
+      if (!error) {
+        next();
+        return;
+      }
+
+      if (error instanceof AppError) {
+        next(error);
+        return;
+      }
+
+      if (
+        error instanceof multer.MulterError &&
+        error.code === 'LIMIT_FILE_SIZE'
+      ) {
+        next(
+          new AppError({
+            message: tooLargeMessage,
+            statusCode: 400,
+            classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+            errorCode: tooLargeErrorCode,
+            resolutionHint: tooLargeResolutionHint,
+            step: LOG_STEPS.VALIDATION_FAIL,
+          }),
+        );
+        return;
+      }
+
+      next(
+        new AppError({
+          message: uploadFailedMessage,
+          statusCode: 400,
+          classification: ERROR_CLASSIFICATIONS.INVALID_INPUT,
+          errorCode: uploadFailedErrorCode,
+          resolutionHint: uploadFailedResolutionHint,
+          step: LOG_STEPS.VALIDATION_FAIL,
+        }),
+      );
+    });
+  };
+}
+
 const paymentProofUpload = createUpload({
   allowedMimeTypes: paymentProofMimeTypes,
   allowedExtensions: new Set(['.pdf', '.jpg', '.jpeg', '.png']),
@@ -136,17 +201,39 @@ const requestAttachmentUpload = createUpload({
     '.docx',
     '.jpg',
     '.jpeg',
+    '.mov',
+    '.mp4',
     '.pdf',
     '.png',
     '.txt',
     '.webp',
+    '.webm',
   ]),
   invalidTypeMessage:
-    'Only PNG, JPG, WEBP, PDF, TXT, DOC, or DOCX chat attachments are allowed',
+    'Only PNG, JPG, WEBP, MP4, MOV, WEBM, PDF, TXT, DOC, or DOCX chat attachments are allowed',
   invalidTypeErrorCode: 'REQUEST_ATTACHMENT_FILE_TYPE_INVALID',
   invalidTypeResolutionHint:
-    'Upload a supported image or document file and try again',
-  fileSizeBytes: 12 * 1024 * 1024,
+    'Upload a supported image, video, or document file and try again',
+  fileSizeBytes: 50 * 1024 * 1024,
+});
+
+const requestIntakeUpload = createUpload({
+  allowedMimeTypes: requestIntakeMimeTypes,
+  allowedExtensions: new Set([
+    '.jpg',
+    '.jpeg',
+    '.mov',
+    '.mp4',
+    '.png',
+    '.webp',
+    '.webm',
+  ]),
+  invalidTypeMessage:
+    'Only PNG, JPG, WEBP, MP4, MOV, or WEBM files are allowed for request intake',
+  invalidTypeErrorCode: 'REQUEST_INTAKE_FILE_TYPE_INVALID',
+  invalidTypeResolutionHint:
+    'Upload supported photos or optional videos and try again',
+  fileSizeBytes: 50 * 1024 * 1024,
 });
 
 const paymentProofUploadMiddleware = buildUploadMiddleware({
@@ -172,7 +259,21 @@ const requestAttachmentUploadMiddleware = buildUploadMiddleware({
     'Retry the upload with a supported attachment file',
 });
 
+const requestIntakeUploadMiddleware = buildArrayUploadMiddleware({
+  upload: requestIntakeUpload,
+  fieldName: 'media',
+  maxCount: 14,
+  tooLargeMessage: 'Request intake media must be 50MB or smaller per file',
+  tooLargeErrorCode: 'REQUEST_INTAKE_FILE_TOO_LARGE',
+  tooLargeResolutionHint: 'Choose a smaller photo or video and try again',
+  uploadFailedMessage: 'Request intake upload failed',
+  uploadFailedErrorCode: 'REQUEST_INTAKE_UPLOAD_FAILED',
+  uploadFailedResolutionHint:
+    'Retry the upload with supported photos or optional videos',
+});
+
 module.exports = {
   paymentProofUploadMiddleware,
+  requestIntakeUploadMiddleware,
   requestAttachmentUploadMiddleware,
 };

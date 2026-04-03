@@ -12,6 +12,7 @@ class AuthUser {
     required this.email,
     required this.phone,
     required this.role,
+    required this.staffType,
     required this.status,
   });
 
@@ -22,6 +23,7 @@ class AuthUser {
   final String email;
   final String? phone;
   final String role;
+  final String? staffType;
   final String status;
 
   bool get isAdmin => role == 'admin';
@@ -37,6 +39,7 @@ class AuthUser {
       'email': email,
       'phone': phone,
       'role': role,
+      'staffType': staffType,
       'status': status,
     };
   }
@@ -50,6 +53,7 @@ class AuthUser {
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
       role: json['role'] as String? ?? 'customer',
+      staffType: json['staffType'] as String?,
       status: json['status'] as String? ?? 'active',
     );
   }

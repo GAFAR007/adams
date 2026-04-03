@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../theme/app_theme.dart';
 import '../data/public_repository.dart';
 import 'public_site_shell.dart';
@@ -25,7 +26,17 @@ class _PublicServicesScreenState extends ConsumerState<PublicServicesScreen> {
   @override
   void initState() {
     super.initState();
-    _language = publicSiteLanguageFromCode(widget.initialLanguageCode);
+    final initialCode = widget.initialLanguageCode;
+    _language = initialCode == null || initialCode.trim().isEmpty
+        ? ref.read(appLanguageProvider)
+        : publicSiteLanguageFromCode(initialCode);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      ref.read(appLanguageProvider.notifier).setLanguage(_language);
+    });
   }
 
   @override
@@ -47,6 +58,7 @@ class _PublicServicesScreenState extends ConsumerState<PublicServicesScreen> {
           language: _language,
           onLanguageChanged: (language) {
             setState(() => _language = language);
+            ref.read(appLanguageProvider.notifier).setLanguage(language);
           },
           activeItem: PublicNavItem.services,
           eyebrow: resolvePublicText(profile.category, _language),

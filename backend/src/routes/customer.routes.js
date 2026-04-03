@@ -10,6 +10,7 @@ const {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerSuggestRequestReplyController,
   customerReplaceRequestAttachmentController,
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,
@@ -26,6 +27,7 @@ const {
 } = require("../middleware/auth.middleware");
 const {
   paymentProofUploadMiddleware,
+  requestIntakeUploadMiddleware,
   requestAttachmentUploadMiddleware,
 } = require("../middleware/upload.middleware");
 const {
@@ -34,6 +36,7 @@ const {
 const {
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
+  customerSuggestRequestReplyValidator,
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
   customerReplaceRequestAttachmentValidator,
@@ -52,6 +55,7 @@ function createCustomerRouter() {
 
   router.post(
     "/requests",
+    requestIntakeUploadMiddleware,
     customerCreateRequestValidator,
     validateRequest,
     customerCreateRequestController,
@@ -98,6 +102,12 @@ function createCustomerRouter() {
     customerReplaceRequestAttachmentValidator,
     validateRequest,
     customerReplaceRequestAttachmentController,
+  );
+  router.post(
+    "/requests/:requestId/reply-assistant",
+    customerSuggestRequestReplyValidator,
+    validateRequest,
+    customerSuggestRequestReplyController,
   );
   router.post(
     "/requests/:requestId/messages",

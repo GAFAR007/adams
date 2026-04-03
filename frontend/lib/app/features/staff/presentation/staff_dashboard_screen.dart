@@ -8,17 +8,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
 import '../../../core/realtime/realtime_service.dart';
 import '../../../shared/data/internal_chat_repository.dart';
-import '../../../shared/presentation/invoice_draft_dialog.dart';
+import '../../../shared/presentation/app_language_toggle.dart';
 import '../../../shared/presentation/presence_chip.dart';
+import '../../../shared/presentation/request_estimation_dialog.dart';
 import '../../../shared/presentation/request_message_composer.dart';
 import '../../../shared/presentation/request_thread_section.dart';
+import '../../../shared/presentation/request_workflow_progress_bar.dart';
 import '../../../shared/presentation/status_chip.dart';
 import '../../../shared/presentation/workspace_bottom_nav.dart';
+import '../../../shared/presentation/workspace_profile_action_button.dart';
 import '../../../shared/utils/external_url_opener.dart';
+import '../../../shared/utils/request_attachment_flow_labels.dart';
 import '../../../shared/utils/request_attachment_picker.dart';
 import '../../../shared/utils/text_file_downloader.dart';
 import '../../../theme/app_theme.dart';
@@ -64,18 +69,78 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
       <String, DateTime>{};
   final Map<String, double> _conversationScrollOffsetsByRequestId =
       <String, double>{};
+  // WHY: Mutation endpoints already return the updated request, so the active thread can update immediately without a broad dashboard refetch.
+  final Map<String, ServiceRequestModel> _requestOverrides =
+      <String, ServiceRequestModel>{};
   final Set<String> _attendingQueueIds = <String>{};
   final Set<String> _updatingAiControlIds = <String>{};
   final Set<String> _sendingMessageIds = <String>{};
   final Set<String> _uploadingAttachmentIds = <String>{};
+  final Set<String> _refiningMessageIds = <String>{};
   final Set<String> _sendingInvoiceIds = <String>{};
   final Set<String> _reviewingPaymentProofIds = <String>{};
   final Set<String> _savingStatusIds = <String>{};
+  final Set<String> _clockingRequestIds = <String>{};
   String? _lastThreadScrollSignature;
   _StaffInboxFilter _selectedFilter = _StaffInboxFilter.waiting;
   _StaffWorkspaceTab _selectedWorkspaceTab = _StaffWorkspaceTab.queue;
   String? _selectedRequestId;
   bool _isUpdatingAvailability = false;
+
+  AppLanguage get _language => ref.read(appLanguageProvider);
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (
+      _,
+      next,
+    ) {
+      next.whenData((event) {
+        if (!event.affectsRequests || !mounted) {
+          return;
+        }
+
+        ref.invalidate(staffDashboardProvider);
+      });
+    });
+  }
+
+  String _t({required String en, required String de}) {
+    return _language.pick(en: en, de: de);
+  }
+
+  String _serviceLabel(ServiceRequestModel request) {
+    return request.serviceLabelForLanguage(_language);
+  }
+
+  bool get _isCustomerCareUser =>
+      (ref.read(authControllerProvider).user?.staffType ?? '') ==
+      'customer_care';
+
+  bool get _isClockingStaffUser {
+    final staffType = ref.read(authControllerProvider).user?.staffType ?? '';
+    return staffType == 'technician' || staffType == 'contractor';
+  }
+
+  String get _currentStaffUserId =>
+      ref.read(authControllerProvider).user?.id ?? '';
+
+  ServiceRequestModel _applyRequestOverride(ServiceRequestModel request) {
+    return _requestOverrides[request.id] ?? request;
+  }
+
+  List<ServiceRequestModel> _applyRequestOverrides(
+    List<ServiceRequestModel> requests,
+  ) {
+    return requests.map(_applyRequestOverride).toList(growable: false);
+  }
+
+  void _storeRequestOverride(ServiceRequestModel request) {
+    setState(() {
+      _requestOverrides[request.id] = request;
+    });
+  }
 
   @override
   void dispose() {
@@ -93,6 +158,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
       requestId,
       () => TextEditingController(),
     );
+  }
+
+  String _normalizeAiSuggestionForComparison(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   void _updateConversationScrollOffset(String requestId, double offset) {
@@ -129,8 +202,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         SnackBar(
           content: Text(
             availability == 'online'
-                ? 'You are now online for the queue'
-                : 'You are now offline for new queue pickups',
+                ? _t(
+                    en: 'You are now online for the queue',
+                    de: 'Sie sind jetzt online für die Warteschlange',
+                  )
+                : _t(
+                    en: 'You are now offline for new queue pickups',
+                    de: 'Sie sind jetzt offline für neue Übernahmen',
+                  ),
           ),
         ),
       );
@@ -147,6 +226,179 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _isUpdatingAvailability = false);
+      }
+    }
+  }
+
+  bool _requestOccursToday(ServiceRequestModel request) {
+    final now = DateTime.now().toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final start = DateTime(
+      (request.calendarStartDate ??
+              request.estimatedStartDate ??
+              request.preferredDate ??
+              request.actualStartDate ??
+              request.createdAt ??
+              today)
+          .year,
+      (request.calendarStartDate ??
+              request.estimatedStartDate ??
+              request.preferredDate ??
+              request.actualStartDate ??
+              request.createdAt ??
+              today)
+          .month,
+      (request.calendarStartDate ??
+              request.estimatedStartDate ??
+              request.preferredDate ??
+              request.actualStartDate ??
+              request.createdAt ??
+              today)
+          .day,
+    );
+    final endSource =
+        request.calendarEndDate ??
+        request.estimatedEndDate ??
+        request.actualEndDate ??
+        request.preferredDate ??
+        request.calendarStartDate ??
+        request.estimatedStartDate ??
+        request.actualStartDate ??
+        request.createdAt ??
+        today;
+    final end = DateTime(endSource.year, endSource.month, endSource.day);
+    return !today.isBefore(start) && !today.isAfter(end);
+  }
+
+  bool _canCurrentStaffClockRequest(ServiceRequestModel request) {
+    if (!_isClockingStaffUser || request.status == 'closed') {
+      return false;
+    }
+
+    if (request.assignedStaff?.id != _currentStaffUserId) {
+      return false;
+    }
+
+    return _requestOccursToday(request);
+  }
+
+  RequestWorkLogModel? _activeCurrentStaffWorkLog(ServiceRequestModel request) {
+    final userId = _currentStaffUserId;
+    final matchingLogs =
+        request.workLogs.where((log) => log.actor?.id == userId).toList()
+          ..sort((left, right) {
+            final leftTime = left.startedAt?.millisecondsSinceEpoch ?? 0;
+            final rightTime = right.startedAt?.millisecondsSinceEpoch ?? 0;
+            return rightTime.compareTo(leftTime);
+          });
+
+    for (final log in matchingLogs) {
+      if (log.stoppedAt == null) {
+        return log;
+      }
+    }
+
+    return null;
+  }
+
+  RequestEstimationModel? _scheduledSiteReviewEstimation(
+    ServiceRequestModel request,
+  ) {
+    if (request.selectedEstimation?.siteReviewDate != null) {
+      return request.selectedEstimation;
+    }
+
+    for (final estimation in request.estimations.reversed) {
+      if (estimation.siteReviewDate != null) {
+        return estimation;
+      }
+    }
+
+    return null;
+  }
+
+  String _formatTimeOfDay(DateTime value) {
+    final local = value.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _clockingSummary(ServiceRequestModel request) {
+    final activeLog = _activeCurrentStaffWorkLog(request);
+    final siteReviewEstimate = _scheduledSiteReviewEstimation(request);
+    final timeLabel =
+        siteReviewEstimate != null &&
+            siteReviewEstimate.siteReviewStartTime.trim().isNotEmpty &&
+            siteReviewEstimate.siteReviewEndTime.trim().isNotEmpty
+        ? '${siteReviewEstimate.siteReviewStartTime} - ${siteReviewEstimate.siteReviewEndTime}'
+        : '';
+    final scheduleLabel = request.assessmentStatus == 'site_visit_scheduled'
+        ? _t(en: 'Site review today', de: 'Vor-Ort-Termin heute')
+        : _t(en: 'Scheduled work today', de: 'Geplante Arbeit heute');
+
+    if (activeLog?.startedAt != null) {
+      final startedAt = activeLog!.startedAt;
+      return _t(
+        en: '$scheduleLabel · Clocked in at ${_formatTimeOfDay(startedAt!)}',
+        de: '$scheduleLabel · Eingestempelt um ${_formatTimeOfDay(startedAt)}',
+      );
+    }
+
+    if (timeLabel.isNotEmpty) {
+      return '$scheduleLabel · $timeLabel';
+    }
+
+    return scheduleLabel;
+  }
+
+  Future<ServiceRequestModel?> _clockRequestWork(
+    ServiceRequestModel request,
+    String action,
+  ) async {
+    setState(() => _clockingRequestIds.add(request.id));
+
+    try {
+      final updatedRequest = await ref
+          .read(staffRepositoryProvider)
+          .clockRequestWork(requestId: request.id, action: action);
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return updatedRequest;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            action == 'clock_in'
+                ? _t(
+                    en: 'Clocked in successfully.',
+                    de: 'Erfolgreich eingestempelt.',
+                  )
+                : _t(
+                    en: 'Clocked out successfully.',
+                    de: 'Erfolgreich ausgestempelt.',
+                  ),
+          ),
+        ),
+      );
+
+      return updatedRequest;
+    } catch (error) {
+      if (!mounted) {
+        return null;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _clockingRequestIds.remove(request.id));
       }
     }
   }
@@ -169,7 +421,12 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('You are now attending ${request.contactFullName}'),
+          content: Text(
+            _t(
+              en: 'You are now attending ${request.contactFullName}',
+              de: 'Sie betreuen jetzt ${request.contactFullName}',
+            ),
+          ),
         ),
       );
     } catch (error) {
@@ -214,9 +471,11 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Reply sent')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_t(en: 'Reply sent', de: 'Antwort gesendet')),
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -230,6 +489,92 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _sendingMessageIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _refineDraftWithAi(ServiceRequestModel request) async {
+    final controller = _controllerFor(request.id);
+    if (_refiningMessageIds.contains(request.id)) {
+      return;
+    }
+
+    final currentDraft = controller.text;
+    setState(() => _refiningMessageIds.add(request.id));
+
+    try {
+      final suggestion = await ref
+          .read(staffRepositoryProvider)
+          .refineReply(requestId: request.id, draft: currentDraft.trim());
+
+      if (!mounted) {
+        return;
+      }
+
+      final resolvedSuggestion = suggestion.trim();
+      if (resolvedSuggestion.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                en: 'Naima AI could not prepare a better reply just now.',
+                de: 'Naima KI konnte gerade keine bessere Antwort vorbereiten.',
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final normalizedCurrentDraft = _normalizeAiSuggestionForComparison(
+        currentDraft,
+      );
+      final normalizedSuggestion = _normalizeAiSuggestionForComparison(
+        resolvedSuggestion,
+      );
+
+      if (normalizedCurrentDraft == normalizedSuggestion) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                en: 'Naima AI reviewed the message and found no stronger rewrite.',
+                de: 'Naima KI hat die Nachricht geprueft und keine bessere Umformulierung gefunden.',
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
+      controller.value = TextEditingValue(
+        text: resolvedSuggestion,
+        selection: TextSelection.collapsed(offset: resolvedSuggestion.length),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Naima AI prepared a refined reply from the conversation.',
+              de: 'Naima KI hat eine verfeinerte Antwort aus dem Verlauf vorbereitet.',
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _refiningMessageIds.remove(request.id));
       }
     }
   }
@@ -270,9 +615,11 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Attachment sent')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_t(en: 'Attachment sent', de: 'Anhang gesendet')),
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -341,6 +688,24 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   }
 
   Future<void> _sendCustomerUpdateRequest(ServiceRequestModel request) async {
+    if (request.invoice != null) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Customer updates are locked after the quotation has been sent.',
+              de: 'Kundenupdates sind gesperrt, nachdem das Angebot gesendet wurde.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
     const updatePrompt =
         'Please review your request details and use the update button below to revise the address, preferred date or time, access instructions, or work scope so I can keep your request accurate.';
 
@@ -361,7 +726,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Customer update request sent to chat')),
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Customer update request sent to chat',
+              de: 'Aktualisierungsanfrage an den Chat gesendet',
+            ),
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -380,28 +752,65 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     }
   }
 
-  Future<void> _sendInvoice(ServiceRequestModel request) async {
-    final draft = await showInvoiceDraftDialog(
-      context,
-      initialInvoice: request.invoice,
-      request: request,
-    );
-    if (draft == null) {
-      return;
+  RequestMessageModel? _latestCustomerUpdateRequestMessage(
+    ServiceRequestModel request,
+  ) {
+    for (final message in request.messages.reversed) {
+      if (message.isCustomerUpdateRequest) {
+        return message;
+      }
     }
 
-    setState(() => _sendingInvoiceIds.add(request.id));
+    return null;
+  }
+
+  RequestMessageModel? _latestCustomerUpdateRequestClearMessage(
+    ServiceRequestModel request,
+  ) {
+    for (final message in request.messages.reversed) {
+      if (message.isCustomerUpdateRequestCleared) {
+        return message;
+      }
+    }
+
+    return null;
+  }
+
+  bool _hasPendingCustomerUpdateRequest(ServiceRequestModel request) {
+    final requestMessage = _latestCustomerUpdateRequestMessage(request);
+    if (requestMessage == null || request.invoice != null) {
+      return false;
+    }
+
+    final requestCreatedAt = requestMessage.createdAt;
+    final clearCreatedAt = _latestCustomerUpdateRequestClearMessage(
+      request,
+    )?.createdAt;
+
+    if (requestCreatedAt == null) {
+      return true;
+    }
+
+    if (clearCreatedAt == null) {
+      return true;
+    }
+
+    return requestCreatedAt.isAfter(clearCreatedAt);
+  }
+
+  Future<void> _clearCustomerUpdateRequest(ServiceRequestModel request) async {
+    const clearPrompt =
+        'The request details are confirmed. No further customer update is needed right now.';
+
+    setState(() => _sendingMessageIds.add(request.id));
 
     try {
       await ref
           .read(staffRepositoryProvider)
-          .sendInvoice(
+          .sendMessage(
             requestId: request.id,
-            amount: draft.amount,
-            dueDate: draft.dueDate,
-            paymentMethod: draft.paymentMethod,
-            paymentInstructions: draft.paymentInstructions,
-            note: draft.note,
+            message: clearPrompt,
+            actionType: requestMessageActionCustomerUpdateRequestCleared,
           );
       ref.invalidate(staffDashboardProvider);
 
@@ -410,7 +819,225 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Quotation sent to customer')),
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Customer update request cleared',
+              de: 'Aktualisierungsanfrage wurde entfernt',
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sendingMessageIds.remove(request.id));
+      }
+    }
+  }
+
+  void _showQuotationWorkflowNotice() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _t(
+            en: 'Quotations are sent from the request chat after the estimate and internal review are both ready.',
+            de: 'Angebote werden aus dem Anfrage-Chat gesendet, sobald Schätzung und interne Prüfung bereit sind.',
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCustomerCareEstimateNotice() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _t(
+            en: 'Customer care cannot edit staff estimates. Wait for a technician or contractor update, then send from the request chat when the quotation is ready.',
+            de: 'Der Kundenservice kann keine Mitarbeiterschätzungen bearbeiten. Warten Sie auf ein Update von Techniker oder Auftragnehmer und senden Sie dann aus dem Anfrage-Chat, sobald das Angebot bereit ist.',
+          ),
+        ),
+      ),
+    );
+  }
+
+  RequestEstimationModel? _currentUserEstimationFor(
+    ServiceRequestModel request,
+  ) {
+    final currentUserId = ref.read(authControllerProvider).user?.id ?? '';
+    return request.estimationForSubmitter(currentUserId);
+  }
+
+  Future<ServiceRequestModel?> _editEstimation(
+    ServiceRequestModel request, {
+    RequestEstimationDialogMode mode = RequestEstimationDialogMode.standard,
+  }) async {
+    if (_isCustomerCareUser) {
+      _showCustomerCareEstimateNotice();
+      return null;
+    }
+
+    if (request.estimationLocked) {
+      _showQuotationWorkflowNotice();
+      return null;
+    }
+
+    final existingEstimation = _currentUserEstimationFor(request);
+    final draft = await showRequestEstimationDialog(
+      context,
+      request: request,
+      initialEstimation: existingEstimation,
+      mode: mode,
+    );
+    if (draft == null) {
+      return null;
+    }
+
+    setState(() => _sendingInvoiceIds.add(request.id));
+
+    try {
+      final updatedRequest = await ref
+          .read(staffRepositoryProvider)
+          .submitEstimation(
+            requestId: request.id,
+            assessmentType: draft.assessmentType,
+            assessmentStatus: draft.assessmentStatus,
+            stage: draft.stage,
+            siteReviewDate: draft.siteReviewDate,
+            siteReviewStartTime: draft.siteReviewStartTime,
+            siteReviewEndTime: draft.siteReviewEndTime,
+            siteReviewCost: draft.siteReviewCost,
+            siteReviewNotes: draft.siteReviewNotes,
+            estimatedStartDate: draft.estimatedStartDate,
+            estimatedEndDate: draft.estimatedEndDate,
+            estimatedHoursPerDay: draft.estimatedHoursPerDay,
+            estimatedHours: draft.estimatedHours,
+            estimatedDays: draft.estimatedDays,
+            estimatedDailySchedule: draft.estimatedDailySchedule
+                .map((entry) => entry.toJson())
+                .toList(),
+            cost: draft.cost,
+            note: draft.note,
+            inspectionNote: draft.inspectionNote,
+          );
+      _storeRequestOverride(updatedRequest);
+
+      if (!mounted) {
+        return updatedRequest;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(switch (mode) {
+            RequestEstimationDialogMode.siteReviewBooking => _t(
+              en: existingEstimation?.hasSiteReviewBooking == true
+                  ? 'Site review booking updated in the calendar'
+                  : 'Site review booked and added to the calendar',
+              de: existingEstimation?.hasSiteReviewBooking == true
+                  ? 'Besichtigung im Kalender aktualisiert'
+                  : 'Besichtigung gebucht und im Kalender eingetragen',
+            ),
+            RequestEstimationDialogMode.finalEstimateAfterReview => _t(
+              en: existingEstimation?.stage == 'final'
+                  ? 'Final estimate updated for admin review'
+                  : 'Final estimate submitted for admin review',
+              de: existingEstimation?.stage == 'final'
+                  ? 'Endgueltige Schaetzung fuer die Admin-Pruefung aktualisiert'
+                  : 'Endgueltige Schaetzung fuer die Admin-Pruefung gespeichert',
+            ),
+            RequestEstimationDialogMode.standard => _t(
+              en: draft.stage == 'draft'
+                  ? (existingEstimation == null
+                        ? 'Draft estimate saved'
+                        : 'Draft estimate updated')
+                  : (existingEstimation == null
+                        ? 'Estimate saved for internal review'
+                        : 'Estimate updated for internal review'),
+              de: draft.stage == 'draft'
+                  ? (existingEstimation == null
+                        ? 'Schätzungsentwurf gespeichert'
+                        : 'Schätzungsentwurf aktualisiert')
+                  : (existingEstimation == null
+                        ? 'Schätzung für die interne Prüfung gespeichert'
+                        : 'Schätzung für die interne Prüfung aktualisiert'),
+            ),
+          }),
+        ),
+      );
+      return updatedRequest;
+    } catch (error) {
+      if (!mounted) {
+        return null;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _sendingInvoiceIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<ServiceRequestModel?> _bookSiteReview(ServiceRequestModel request) {
+    return _editEstimation(
+      request,
+      mode: RequestEstimationDialogMode.siteReviewBooking,
+    );
+  }
+
+  Future<ServiceRequestModel?> _runFinalEstimate(ServiceRequestModel request) {
+    return _editEstimation(
+      request,
+      mode: RequestEstimationDialogMode.finalEstimateAfterReview,
+    );
+  }
+
+  Future<void> _sendQuotationToCustomer(ServiceRequestModel request) async {
+    if (!_isCustomerCareUser) {
+      _showQuotationWorkflowNotice();
+      return;
+    }
+
+    setState(() => _sendingInvoiceIds.add(request.id));
+
+    try {
+      await ref
+          .read(staffRepositoryProvider)
+          .sendQuotation(requestId: request.id);
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              en: request.quoteReview?.isSiteReview == true
+                  ? 'Site review booking sent to customer'
+                  : 'Quotation sent to customer',
+              de: request.quoteReview?.isSiteReview == true
+                  ? 'Besichtigungstermin an den Kunden gesendet'
+                  : 'Angebot an den Kunden gesendet',
+            ),
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -425,6 +1052,51 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _sendingInvoiceIds.remove(request.id));
+      }
+    }
+  }
+
+  Future<void> _unlockPaymentProofUpload(ServiceRequestModel request) async {
+    if (!_isCustomerCareUser) {
+      _showQuotationWorkflowNotice();
+      return;
+    }
+
+    setState(() => _reviewingPaymentProofIds.add(request.id));
+
+    try {
+      await ref
+          .read(staffRepositoryProvider)
+          .unlockPaymentProofUpload(requestId: request.id);
+      ref.invalidate(staffDashboardProvider);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Payment proof upload reopened',
+              de: 'Upload fuer Zahlungsnachweis wieder freigegeben',
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _reviewingPaymentProofIds.remove(request.id));
       }
     }
   }
@@ -490,8 +1162,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         SnackBar(
           content: Text(
             decision == 'approved'
-                ? 'Payment proof approved'
-                : 'Payment proof rejected',
+                ? _t(
+                    en: 'Payment proof approved',
+                    de: 'Zahlungsnachweis bestätigt',
+                  )
+                : _t(
+                    en: 'Payment proof rejected',
+                    de: 'Zahlungsnachweis abgelehnt',
+                  ),
           ),
         ),
       );
@@ -521,7 +1199,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final opened = await openExternalUrl(fileUrl);
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Opening proof is not supported here')),
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Opening proof is not supported here',
+              de: 'Der Nachweis kann hier nicht geöffnet werden',
+            ),
+          ),
+        ),
       );
     }
   }
@@ -543,10 +1228,206 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     return latestProofUrl == messageProofUrl;
   }
 
+  String _formatWorkflowDate(String? isoDate) {
+    final parsed = DateTime.tryParse(isoDate ?? '');
+    if (parsed == null) {
+      return _t(en: 'Not set', de: 'Nicht gesetzt');
+    }
+
+    final day = parsed.day.toString().padLeft(2, '0');
+    final month = parsed.month.toString().padLeft(2, '0');
+    final year = parsed.year.toString();
+    return '$day/$month/$year';
+  }
+
+  String _formatWorkflowCurrency(dynamic amount, [String currency = 'EUR']) {
+    final numericAmount = amount is num ? amount.toDouble() : 0;
+    return '$currency ${numericAmount.toStringAsFixed(2)}';
+  }
+
+  Widget _buildQuoteWorkflowCard(
+    ServiceRequestModel request,
+    RequestMessageModel message,
+  ) {
+    final payload = message.actionPayload ?? const <String, dynamic>{};
+    final title = (payload['title'] as String?) ?? message.text;
+    final summary = (payload['summary'] as String?) ?? '';
+    final sourceName = (payload['sourceEstimateOwnerName'] as String?) ?? '';
+    final sourceRole =
+        (payload['sourceEstimateOwnerStaffTypeLabel'] as String?) ?? '';
+    final totalAmount = payload['totalAmount'];
+    final currency = (payload['currency'] as String?) ?? 'EUR';
+    final reviewKind =
+        (payload['reviewKind'] as String?) ??
+        (message.isSiteReviewReadyForCustomerCare ||
+                message.isSiteReviewReadyForInternalReview ||
+                message.isSiteReviewSent
+            ? requestReviewKindSiteReview
+            : requestReviewKindQuotation);
+    final plannedStartDate = payload['plannedStartDate'] as String?;
+    final plannedExpectedEndDate = payload['plannedExpectedEndDate'] as String?;
+    final siteReviewDate = payload['siteReviewDate'] as String?;
+    final canSendFromThisCard =
+        (message.isQuotationReadyForCustomerCare ||
+            message.isSiteReviewReadyForCustomerCare) &&
+        _isCustomerCareUser &&
+        request.canCustomerCareSendQuotation;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTheme.cobalt.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.assignment_turned_in_rounded,
+                    color: AppTheme.cobalt,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (summary.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                summary,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  height: 1.35,
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                if (totalAmount is num)
+                  _WorkflowMetaPill(
+                    label: _formatWorkflowCurrency(totalAmount, currency),
+                  ),
+                if (reviewKind == requestReviewKindSiteReview &&
+                    siteReviewDate != null)
+                  _WorkflowMetaPill(
+                    label:
+                        '${_t(en: 'Review', de: 'Besichtigung')}: ${_formatWorkflowDate(siteReviewDate)}',
+                  ),
+                if (plannedStartDate != null)
+                  _WorkflowMetaPill(
+                    label:
+                        '${_t(en: 'Start', de: 'Start')}: ${_formatWorkflowDate(plannedStartDate)}',
+                  ),
+                if (plannedExpectedEndDate != null)
+                  _WorkflowMetaPill(
+                    label:
+                        '${_t(en: 'End', de: 'Ende')}: ${_formatWorkflowDate(plannedExpectedEndDate)}',
+                  ),
+                if (sourceName.isNotEmpty)
+                  _WorkflowMetaPill(
+                    label: sourceRole.isEmpty
+                        ? sourceName
+                        : '$sourceName · $sourceRole',
+                  ),
+              ],
+            ),
+            if (message.isQuotationReadyForCustomerCare ||
+                message.isSiteReviewReadyForCustomerCare) ...<Widget>[
+              const SizedBox(height: 12),
+              if (canSendFromThisCard)
+                FilledButton.tonalIcon(
+                  onPressed: _sendingInvoiceIds.contains(request.id)
+                      ? null
+                      : () => _sendQuotationToCustomer(request),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.18),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: Text(
+                    _sendingInvoiceIds.contains(request.id)
+                        ? reviewKind == requestReviewKindSiteReview
+                              ? _t(
+                                  en: 'Sending site review...',
+                                  de: 'Besichtigung wird gesendet...',
+                                )
+                              : _t(
+                                  en: 'Sending quotation...',
+                                  de: 'Angebot wird gesendet...',
+                                )
+                        : reviewKind == requestReviewKindSiteReview
+                        ? _t(
+                            en: 'Send site review to customer',
+                            de: 'Besichtigung an Kunden senden',
+                          )
+                        : _t(
+                            en: 'Send quotation to customer',
+                            de: 'Angebot an Kunden senden',
+                          ),
+                  ),
+                )
+              else
+                Text(
+                  _isCustomerCareUser
+                      ? _t(
+                          en: 'Waiting for the latest internal review before send.',
+                          de: 'Warten auf die aktuelle interne Prüfung vor dem Senden.',
+                        )
+                      : _t(
+                          en: 'Customer care can send this quotation from the chat once ready.',
+                          de: 'Der Kundenservice kann dieses Angebot senden, sobald es im Chat bereit ist.',
+                        ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.62),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget? _buildStaffThreadMessageAction(
     ServiceRequestModel request,
     RequestMessageModel message,
   ) {
+    if (message.isEstimateUpdated ||
+        message.isSiteReviewReadyForInternalReview ||
+        message.isQuoteReadyForInternalReview ||
+        message.isInternalReviewUpdated ||
+        message.isSiteReviewReadyForCustomerCare ||
+        message.isQuotationReadyForCustomerCare ||
+        message.isQuotationInvalidated ||
+        message.isSiteReviewSent ||
+        message.isQuotationSent) {
+      return _buildQuoteWorkflowCard(request, message);
+    }
+
     final invoice = request.invoice;
     if (invoice == null || !_isLatestProofUploadMessage(request, message)) {
       return null;
@@ -555,17 +1436,17 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final invoiceStatus = invoice.status;
     final statusConfig = switch (invoiceStatus) {
       paymentRequestStatusApproved => (
-        label: 'Payment approved',
+        label: _t(en: 'Payment approved', de: 'Zahlung bestätigt'),
         background: const Color(0xFF1D4930),
         foreground: const Color(0xFFDDF7E4),
       ),
       paymentRequestStatusRejected => (
-        label: 'Payment rejected',
+        label: _t(en: 'Payment rejected', de: 'Zahlung abgelehnt'),
         background: const Color(0xFF5A2A21),
         foreground: const Color(0xFFFFE0DA),
       ),
       _ => (
-        label: 'Pending review',
+        label: _t(en: 'Pending review', de: 'Prüfung ausstehend'),
         background: const Color(0xFF193446),
         foreground: const Color(0xFFDFF3FF),
       ),
@@ -610,8 +1491,8 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                 icon: const Icon(Icons.verified_rounded, size: 18),
                 label: Text(
                   _reviewingPaymentProofIds.contains(request.id)
-                      ? 'Saving...'
-                      : 'Approve payment',
+                      ? _t(en: 'Saving...', de: 'Speichert...')
+                      : _t(en: 'Approve payment', de: 'Zahlung bestätigen'),
                 ),
               ),
             if (invoiceStatus == paymentRequestStatusProofSubmitted)
@@ -625,7 +1506,31 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                   side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
                 ),
                 icon: const Icon(Icons.close_rounded, size: 18),
-                label: const Text('Reject proof'),
+                label: Text(_t(en: 'Reject proof', de: 'Nachweis ablehnen')),
+              ),
+            if (_isCustomerCareUser &&
+                invoice.requiresCustomerProof &&
+                invoice.isProofUploadExpired &&
+                !invoice.isProofUploadUnlocked &&
+                invoice.proof == null &&
+                !invoice.isProofSubmitted &&
+                !invoice.isApproved)
+              OutlinedButton.icon(
+                onPressed: _reviewingPaymentProofIds.contains(request.id)
+                    ? null
+                    : () => _unlockPaymentProofUpload(request),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.04),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                icon: const Icon(Icons.lock_open_rounded, size: 18),
+                label: Text(
+                  _t(
+                    en: 'Unlock proof upload',
+                    de: 'Nachweis-Upload entsperren',
+                  ),
+                ),
               ),
           ],
         ),
@@ -642,7 +1547,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final opened = await openExternalUrl(receiptUrl);
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Opening receipt is not supported here')),
+        SnackBar(
+          content: Text(
+            _t(
+              en: 'Opening receipt is not supported here',
+              de: 'Der Beleg kann hier nicht geöffnet werden',
+            ),
+          ),
+        ),
       );
     }
   }
@@ -681,6 +1593,157 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final hour = localValue.hour.toString().padLeft(2, '0');
     final minute = localValue.minute.toString().padLeft(2, '0');
     return '$day/$month/$year $hour:$minute';
+  }
+
+  bool _isSiteReviewWorkLog(
+    ServiceRequestModel request,
+    RequestWorkLogModel workLog,
+  ) {
+    if (workLog.workType == requestWorkLogTypeSiteReview) {
+      return true;
+    }
+
+    if (workLog.workType == requestWorkLogTypeMainJob) {
+      return false;
+    }
+
+    // WHY: Older saved work logs do not have workType yet, so infer site-review
+    // logs from the pre-quotation timeline instead of mixing them into main-job
+    // clock rows.
+    if (!request.isSiteReviewRequired) {
+      return false;
+    }
+
+    final timestamp =
+        workLog.startedAt ?? workLog.createdAt ?? workLog.stoppedAt;
+    final reviewBoundary =
+        request.quoteReadyAt ??
+        request.internalReviewUpdatedAt ??
+        request.latestEstimateUpdatedAt;
+    if (timestamp == null || reviewBoundary == null) {
+      return true;
+    }
+
+    return !timestamp.isAfter(reviewBoundary);
+  }
+
+  RequestWorkLogModel? _firstWorkLog(
+    ServiceRequestModel request, {
+    required bool siteReviewOnly,
+  }) {
+    final sortedLogs =
+        request.workLogs
+            .where(
+              (log) =>
+                  log.startedAt != null &&
+                  _isSiteReviewWorkLog(request, log) == siteReviewOnly,
+            )
+            .toList()
+          ..sort((left, right) {
+            final leftTime = left.startedAt?.millisecondsSinceEpoch ?? 0;
+            final rightTime = right.startedAt?.millisecondsSinceEpoch ?? 0;
+            return leftTime.compareTo(rightTime);
+          });
+
+    return sortedLogs.isEmpty ? null : sortedLogs.first;
+  }
+
+  RequestWorkLogModel? _latestStoppedWorkLog(
+    ServiceRequestModel request, {
+    required bool siteReviewOnly,
+  }) {
+    final sortedLogs =
+        request.workLogs
+            .where(
+              (log) =>
+                  log.stoppedAt != null &&
+                  _isSiteReviewWorkLog(request, log) == siteReviewOnly,
+            )
+            .toList()
+          ..sort((left, right) {
+            final leftTime = left.stoppedAt?.millisecondsSinceEpoch ?? 0;
+            final rightTime = right.stoppedAt?.millisecondsSinceEpoch ?? 0;
+            return rightTime.compareTo(leftTime);
+          });
+
+    return sortedLogs.isEmpty ? null : sortedLogs.first;
+  }
+
+  String _formatRequestWorkLogLabel(
+    RequestWorkLogModel? workLog,
+    DateTime? timestamp,
+  ) {
+    if (timestamp == null) {
+      return _t(en: 'Not available', de: 'Nicht verfügbar');
+    }
+
+    final actorName = workLog?.actor?.fullName.trim() ?? '';
+    if (actorName.isEmpty) {
+      return _formatRequestDateTime(timestamp);
+    }
+
+    return '${_formatRequestDateTime(timestamp)} · $actorName';
+  }
+
+  String _formatEstimatedScheduleBoundary(
+    ServiceRequestModel request, {
+    required bool isStart,
+  }) {
+    final estimation = request.selectedEstimation;
+    final scheduleEntries =
+        estimation?.estimatedDailySchedule ??
+        const <RequestEstimationPlannedDayModel>[];
+    RequestEstimationPlannedDayModel? scheduleEntry;
+
+    if (scheduleEntries.isNotEmpty) {
+      final sortedEntries = scheduleEntries.toList()
+        ..sort((left, right) {
+          final leftTime = left.date?.millisecondsSinceEpoch ?? 0;
+          final rightTime = right.date?.millisecondsSinceEpoch ?? 0;
+          return leftTime.compareTo(rightTime);
+        });
+      scheduleEntry = isStart ? sortedEntries.first : sortedEntries.last;
+    }
+
+    final fallbackDate = isStart
+        ? request.estimatedStartDate
+        : request.estimatedEndDate;
+    final scheduleDate = scheduleEntry?.date ?? fallbackDate;
+    if (scheduleDate == null) {
+      return _t(en: 'Not available', de: 'Nicht verfügbar');
+    }
+
+    final scheduleTime = isStart
+        ? scheduleEntry?.startTime.trim() ?? ''
+        : scheduleEntry?.endTime.trim() ?? '';
+    final dateLabel = _formatRequestDate(scheduleDate);
+    return scheduleTime.isEmpty ? dateLabel : '$dateLabel $scheduleTime';
+  }
+
+  String _formatScheduledSiteReviewDate(ServiceRequestModel request) {
+    final estimation = _scheduledSiteReviewEstimation(request);
+    if (estimation?.siteReviewDate == null) {
+      return _t(en: 'Not available', de: 'Nicht verfügbar');
+    }
+
+    return _formatRequestDate(estimation!.siteReviewDate);
+  }
+
+  String _formatScheduledSiteReviewTime(ServiceRequestModel request) {
+    final estimation = _scheduledSiteReviewEstimation(request);
+    final startTime = estimation?.siteReviewStartTime.trim() ?? '';
+    final endTime = estimation?.siteReviewEndTime.trim() ?? '';
+    if (startTime.isEmpty && endTime.isEmpty) {
+      return _t(en: 'Not available', de: 'Nicht verfügbar');
+    }
+    if (startTime.isEmpty) {
+      return endTime;
+    }
+    if (endTime.isEmpty) {
+      return startTime;
+    }
+
+    return '$startTime - $endTime';
   }
 
   String _slugify(String value) {
@@ -869,7 +1932,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
             .toList(),
     };
 
-    return <ServiceRequestModel>[...requests]
+    return _applyRequestOverrides(<ServiceRequestModel>[...requests])
       ..sort(compareServiceRequestsByLatestActivity);
   }
 
@@ -906,7 +1969,12 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         ? 'System'
         : 'Staff';
 
-    final attachmentName = latestMessage.attachment?.originalName.trim();
+    final attachmentName = latestMessage.attachment == null
+        ? null
+        : requestAttachmentDisplayNameForMessage(
+            latestMessage,
+            language: ref.read(appLanguageProvider),
+          );
     if (attachmentName != null && attachmentName.isNotEmpty) {
       return '$senderLabel sent $attachmentName';
     }
@@ -1038,7 +2106,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     }
 
     if (messageDay == today.subtract(const Duration(days: 1))) {
-      return 'Yesterday';
+      return _t(en: 'Yesterday', de: 'Gestern');
     }
 
     final day = localValue.day.toString().padLeft(2, '0');
@@ -1060,12 +2128,12 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
   String _filterLabel(_StaffInboxFilter filter) {
     return switch (filter) {
-      _StaffInboxFilter.waiting => 'Waiting',
-      _StaffInboxFilter.active => 'Active',
-      _StaffInboxFilter.quoted => 'Quoted',
-      _StaffInboxFilter.confirmed => 'Confirmed',
-      _StaffInboxFilter.pending => 'Pending',
-      _StaffInboxFilter.closed => 'Closed',
+      _StaffInboxFilter.waiting => _t(en: 'Waiting', de: 'Wartend'),
+      _StaffInboxFilter.active => _t(en: 'Active', de: 'Aktiv'),
+      _StaffInboxFilter.quoted => _t(en: 'Quoted', de: 'Angebot'),
+      _StaffInboxFilter.confirmed => _t(en: 'Confirmed', de: 'Bestaetigt'),
+      _StaffInboxFilter.pending => _t(en: 'Pending', de: 'Ausstehend'),
+      _StaffInboxFilter.closed => _t(en: 'Closed', de: 'Geschlossen'),
     };
   }
 
@@ -1309,21 +2377,39 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         ? null
         : BorderRadius.circular(30);
     final emptyLabel = switch (_selectedFilter) {
-      _StaffInboxFilter.waiting => 'No waiting queue threads right now.',
-      _StaffInboxFilter.active => 'No active customer threads right now.',
-      _StaffInboxFilter.quoted => 'No quoted requests yet.',
-      _StaffInboxFilter.confirmed => 'No confirmed appointments yet.',
-      _StaffInboxFilter.pending => 'No pending start jobs right now.',
-      _StaffInboxFilter.closed => 'No closed threads in this view.',
+      _StaffInboxFilter.waiting => _t(
+        en: 'No waiting queue threads right now.',
+        de: 'Derzeit keine wartenden Warteschlangen-Chats.',
+      ),
+      _StaffInboxFilter.active => _t(
+        en: 'No active customer threads right now.',
+        de: 'Derzeit keine aktiven Kunden-Chats.',
+      ),
+      _StaffInboxFilter.quoted => _t(
+        en: 'No quoted requests yet.',
+        de: 'Noch keine Angebotsanfragen.',
+      ),
+      _StaffInboxFilter.confirmed => _t(
+        en: 'No confirmed appointments yet.',
+        de: 'Noch keine bestätigten Termine.',
+      ),
+      _StaffInboxFilter.pending => _t(
+        en: 'No pending start jobs right now.',
+        de: 'Derzeit keine ausstehenden Startaufträge.',
+      ),
+      _StaffInboxFilter.closed => _t(
+        en: 'No closed threads in this view.',
+        de: 'In dieser Ansicht keine geschlossenen Chats.',
+      ),
     };
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0E10),
+        color: AppTheme.darkPage,
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[Color(0xFF121418), Color(0xFF0D0E10)],
+          colors: <Color>[AppTheme.darkPageRaised, AppTheme.darkPage],
         ),
         borderRadius: surfaceRadius,
         border: edgeToEdge
@@ -1357,7 +2443,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        'Team Queue',
+                        _t(en: 'Team Queue', de: 'Team-Warteschlange'),
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(
                               color: Colors.white,
@@ -1372,14 +2458,23 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                         children: <Widget>[
                           PresenceChip(
                             label: isOnline
-                                ? 'Open for pickup'
-                                : 'Pickup paused',
+                                ? _t(
+                                    en: 'Open for pickup',
+                                    de: 'Bereit zur Übernahme',
+                                  )
+                                : _t(
+                                    en: 'Pickup paused',
+                                    de: 'Übernahme pausiert',
+                                  ),
                             isOnline: isOnline,
                             dark: true,
                             compact: true,
                           ),
                           Text(
-                            '${bundle.clearedTodayCount} cleared today',
+                            _t(
+                              en: '${bundle.clearedTodayCount} cleared today',
+                              de: '${bundle.clearedTodayCount} heute erledigt',
+                            ),
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: Colors.white.withValues(alpha: 0.58),
@@ -1460,259 +2555,121 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
   }) {
     final isWaiting = request.assignedStaff == null;
     final isAttending = _attendingQueueIds.contains(request.id);
-    final isOnline = _isCurrentStaffOnline(currentAvailability);
     final isCompact = MediaQuery.sizeOf(context).width < 720;
-    final compactCollapse = isCompact ? collapseProgress.clamp(0.0, 1.0) : 0.0;
-    final horizontalPadding = isCompact ? 16.0 : 22.0;
-    final verticalTopPadding = isCompact ? 8 - (compactCollapse * 3) : 16.0;
-    final verticalBottomPadding = isCompact ? 7 - (compactCollapse * 3) : 14.0;
-    final titleFontSize = isCompact ? 18 - (compactCollapse * 2) : null;
-    final actionsTopSpacing = isCompact ? 6 - (compactCollapse * 2) : 8.0;
+    final compactCollapse = collapseProgress.clamp(0.0, 1.0);
+    final horizontalPadding = isCompact ? 10.0 : 14.0;
+    final verticalPadding = isCompact
+        ? 6 - (compactCollapse * 2)
+        : 8 - (compactCollapse * 2);
     final titleColor = dark ? Colors.white : null;
     final metaColor = dark ? Colors.white.withValues(alpha: 0.68) : null;
     final subtitleColor = dark
         ? Colors.white.withValues(alpha: 0.54)
         : metaColor;
     final backForeground = dark ? Colors.white.withValues(alpha: 0.84) : null;
+    final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+      fontSize: isCompact ? 16 : 18,
+      color: titleColor,
+      fontWeight: FontWeight.w700,
+      height: 1.0,
+    );
+    final subtitleStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: subtitleColor,
+      fontWeight: FontWeight.w600,
+      fontSize: isCompact ? 12 : 13,
+      height: 1.1,
+    );
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       padding: EdgeInsets.fromLTRB(
         horizontalPadding,
-        verticalTopPadding,
+        verticalPadding,
         horizontalPadding,
-        verticalBottomPadding,
+        verticalPadding,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          if (isCompact)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    if (onBack != null)
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: onBack,
-                            style: TextButton.styleFrom(
-                              foregroundColor: backForeground,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 2,
-                                vertical: 0,
-                              ),
-                              minimumSize: const Size(0, 26),
-                              visualDensity: VisualDensity.compact,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            icon: const Icon(
-                              Icons.arrow_back_rounded,
-                              size: 18,
-                            ),
-                            label: const Text('Queue'),
-                          ),
-                        ),
-                      )
-                    else
-                      const Spacer(),
-                  ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              if (onBack != null) ...<Widget>[
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  onPressed: onBack,
+                  icon: Icon(Icons.arrow_back_rounded, color: backForeground),
                 ),
-                SizedBox(height: 8 - (compactCollapse * 2)),
-                Row(
+                const SizedBox(width: 6),
+              ],
+              _buildConversationAvatarButton(
+                context,
+                fullName: request.contactFullName,
+                onPressed: onOpenProfile,
+                dark: dark,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            request.contactFullName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  fontSize: titleFontSize,
-                                  fontWeight: FontWeight.w700,
-                                  color: titleColor,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${request.serviceLabel} · ${request.city}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: subtitleColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ],
-                      ),
+                    Text(
+                      request.contactFullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: titleStyle,
                     ),
-                    const SizedBox(width: 12),
-                    _buildConversationHeaderStatusPill(
-                      context,
-                      request.status,
-                      compact: true,
-                      dark: dark,
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_serviceLabel(request)} · ${request.city}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: subtitleStyle,
                     ),
                   ],
                 ),
-                SizedBox(height: actionsTopSpacing + 2),
-                Row(
-                  children: <Widget>[
-                    PresenceChip(
-                      label: isOnline ? 'Online' : 'Offline',
-                      isOnline: isOnline,
-                      dark: dark,
-                      compact: true,
-                    ),
-                    if (!isWaiting && request.status != 'closed') ...<Widget>[
-                      const SizedBox(width: 8),
-                      _buildAiControlToggle(
-                        context,
-                        request: request,
-                        currentAvailability: currentAvailability,
-                        compact: true,
-                        dark: dark,
-                      ),
-                    ],
-                    const Spacer(),
-                    _buildCompactHeaderButton(
-                      context,
-                      onPressed: onOpenProfile,
-                      icon: Icons.person_outline_rounded,
-                      label: '',
-                      dark: dark,
-                    ),
-                    const SizedBox(width: 8),
-                    if (isWaiting)
-                      _buildCompactHeaderButton(
-                        context,
-                        onPressed: isAttending
-                            ? null
-                            : () => _attendQueue(request),
-                        icon: Icons.play_arrow_rounded,
-                        label: '',
-                        filled: true,
-                        dark: dark,
-                      )
-                    else if (onOpenWorkflow != null)
-                      _buildCompactHeaderButton(
-                        context,
-                        onPressed: onOpenWorkflow,
-                        icon: Icons.tune_rounded,
-                        label: '',
-                        dark: dark,
-                      ),
-                  ],
-                ),
-              ],
-            )
-          else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        request.contactFullName,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.headlineMedium?.copyWith(color: titleColor),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '${request.serviceLabel} · ${request.city}',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(color: metaColor),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: <Widget>[
-                          PresenceChip(
-                            label: isOnline
-                                ? 'You are online'
-                                : 'You are offline',
-                            isOnline: isOnline,
-                            dark: dark,
-                          ),
-                          if (!isWaiting && request.status != 'closed')
-                            _buildAiControlToggle(
-                              context,
-                              request: request,
-                              currentAvailability: currentAvailability,
-                              dark: dark,
-                            ),
-                          OutlinedButton.icon(
-                            onPressed: onOpenProfile,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: dark
-                                  ? Colors.white
-                                  : AppTheme.ink,
-                              backgroundColor: dark
-                                  ? Colors.white.withValues(alpha: 0.04)
-                                  : Colors.white,
-                              side: BorderSide(
-                                color: dark
-                                    ? Colors.white.withValues(alpha: 0.12)
-                                    : AppTheme.clay.withValues(alpha: 0.82),
-                              ),
-                            ),
-                            icon: const Icon(Icons.person_outline_rounded),
-                            label: const Text('Profile'),
-                          ),
-                          if (isWaiting)
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.cobalt,
-                                foregroundColor: Colors.white,
-                              ),
-                              onPressed: isAttending
-                                  ? null
-                                  : () => _attendQueue(request),
-                              child: Text(
-                                isAttending ? 'Attending...' : 'Attend',
-                              ),
-                            )
-                          else if (onOpenWorkflow != null)
-                            FilledButton.tonalIcon(
-                              onPressed: onOpenWorkflow,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: dark
-                                    ? Colors.white.withValues(alpha: 0.08)
-                                    : null,
-                                foregroundColor: dark
-                                    ? Colors.white
-                                    : AppTheme.ink,
-                              ),
-                              icon: const Icon(Icons.tune_rounded),
-                              label: const Text('Workflow'),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                _buildConversationHeaderStatusPill(
+              ),
+              if (!isWaiting && request.status != 'closed') ...<Widget>[
+                const SizedBox(width: 6),
+                _buildAiControlToggle(
                   context,
-                  request.status,
+                  request: request,
+                  currentAvailability: currentAvailability,
+                  compact: true,
                   dark: dark,
                 ),
               ],
-            ),
+              const SizedBox(width: 6),
+              _buildConversationHeaderStatusPill(
+                context,
+                request.status,
+                compact: true,
+                dark: dark,
+              ),
+              if (isWaiting || onOpenWorkflow != null) ...<Widget>[
+                const SizedBox(width: 6),
+                _buildCompactHeaderButton(
+                  context,
+                  onPressed: isWaiting
+                      ? (isAttending ? null : () => _attendQueue(request))
+                      : onOpenWorkflow,
+                  icon: isWaiting
+                      ? Icons.play_arrow_rounded
+                      : Icons.tune_rounded,
+                  label: '',
+                  filled: isWaiting,
+                  dark: dark,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 4),
+          RequestWorkflowProgressBar(request: request, dark: dark),
         ],
       ),
     );
@@ -1793,7 +2750,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
           vertical: compact ? 6 : 7,
         ),
         child: Text(
-          requestStatusLabelFor(status),
+          requestStatusLabelFor(status, language: _language),
           style:
               (compact
                       ? Theme.of(context).textTheme.labelSmall
@@ -1846,77 +2803,109 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
     return Tooltip(
       message: isForcedOn
-          ? 'Naima stays active while you are offline'
+          ? _t(
+              en: 'Naima stays active while you are offline',
+              de: 'Naima bleibt aktiv, solange Sie offline sind',
+            )
           : isActive
-          ? 'Naima is covering this chat'
-          : 'Turn Naima on to cover this chat',
+          ? _t(
+              en: 'Naima is covering this chat',
+              de: 'Naima betreut diesen Chat',
+            )
+          : _t(
+              en: 'Turn Naima on to cover this chat',
+              de: 'Naima für diesen Chat einschalten',
+            ),
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 160),
         opacity: isUpdating ? 0.72 : 1,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(compact ? 18 : 14),
-            border: Border.all(color: borderColor),
-          ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 6 : 10,
-              vertical: compact ? 2 : 5,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(
-                  Icons.auto_awesome_rounded,
-                  size: compact ? 14 : 16,
-                  color: iconColor,
-                ),
-                if (!compact) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Text(
-                    'Naima',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: textColor,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-                SizedBox(
-                  width: compact ? 30 : 36,
-                  child: Transform.scale(
-                    scale: compact ? 0.66 : 0.82,
-                    child: Switch.adaptive(
-                      value: isActive,
-                      onChanged: allowInteraction
-                          ? (bool value) => _updateAiControl(
-                              request,
-                              value,
-                              currentAvailability: currentAvailability,
-                            )
-                          : null,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      activeThumbColor: dark && compact
-                          ? Colors.white
-                          : AppTheme.cobalt,
-                      activeTrackColor: dark && compact
-                          ? AppTheme.cobalt.withValues(alpha: 0.88)
-                          : AppTheme.cobalt.withValues(alpha: 0.42),
-                      inactiveThumbColor: dark
-                          ? Colors.white.withValues(alpha: 0.88)
-                          : AppTheme.ink,
-                      inactiveTrackColor: dark && compact
-                          ? Colors.white.withValues(alpha: 0.16)
-                          : dark
-                          ? Colors.white.withValues(alpha: 0.18)
-                          : AppTheme.clay.withValues(alpha: 0.42),
-                    ),
+        child: compact
+            ? SizedBox(
+                height: 24,
+                width: 34,
+                child: Transform.scale(
+                  scale: 0.58,
+                  child: Switch.adaptive(
+                    value: isActive,
+                    onChanged: allowInteraction
+                        ? (bool value) => _updateAiControl(
+                            request,
+                            value,
+                            currentAvailability: currentAvailability,
+                          )
+                        : null,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    activeThumbColor: dark ? Colors.white : AppTheme.cobalt,
+                    activeTrackColor: AppTheme.cobalt.withValues(alpha: 0.54),
+                    inactiveThumbColor: dark
+                        ? Colors.white.withValues(alpha: 0.88)
+                        : AppTheme.ink,
+                    inactiveTrackColor: dark
+                        ? Colors.white.withValues(alpha: 0.18)
+                        : AppTheme.clay.withValues(alpha: 0.42),
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
+              )
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 16,
+                        color: iconColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _t(en: 'Naima', de: 'Naima'),
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: textColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      SizedBox(
+                        width: 36,
+                        child: Transform.scale(
+                          scale: 0.82,
+                          child: Switch.adaptive(
+                            value: isActive,
+                            onChanged: allowInteraction
+                                ? (bool value) => _updateAiControl(
+                                    request,
+                                    value,
+                                    currentAvailability: currentAvailability,
+                                  )
+                                : null,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            activeThumbColor: AppTheme.cobalt,
+                            activeTrackColor: AppTheme.cobalt.withValues(
+                              alpha: 0.42,
+                            ),
+                            inactiveThumbColor: dark
+                                ? Colors.white.withValues(alpha: 0.88)
+                                : AppTheme.ink,
+                            inactiveTrackColor: dark
+                                ? Colors.white.withValues(alpha: 0.18)
+                                : AppTheme.clay.withValues(alpha: 0.42),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -1926,6 +2915,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     required VoidCallback? onPressed,
     required IconData icon,
     required String label,
+    String? avatarText,
     bool filled = false,
     bool dark = false,
   }) {
@@ -1937,23 +2927,57 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final backgroundColor = filled
         ? AppTheme.cobalt
         : dark
-        ? AppTheme.cobalt.withValues(alpha: 0.14)
+        ? Colors.white.withValues(alpha: 0.05)
         : Colors.white;
     final borderColor = dark
-        ? AppTheme.cobalt.withValues(alpha: filled ? 0 : 0.24)
+        ? Colors.white.withValues(alpha: filled ? 0 : 0.12)
         : AppTheme.clay.withValues(alpha: 0.82);
 
+    if (label.isEmpty) {
+      return SizedBox.square(
+        dimension: 28,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: borderColor),
+          ),
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            onPressed: onPressed,
+            icon: avatarText == null
+                ? Icon(icon, size: 16, color: foregroundColor)
+                : CircleAvatar(
+                    radius: 14,
+                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
+                    child: Text(
+                      avatarText,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppTheme.cobalt,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      );
+    }
+
     return SizedBox(
-      height: 34,
+      height: 32,
       child: TextButton.icon(
         onPressed: onPressed,
         style: TextButton.styleFrom(
           foregroundColor: foregroundColor,
           backgroundColor: backgroundColor,
           side: filled ? null : BorderSide(color: borderColor),
-          minimumSize: Size(label.isEmpty ? 34 : 0, 34),
+          minimumSize: Size(label.isEmpty ? 32 : 0, 32),
           padding: EdgeInsets.symmetric(
-            horizontal: label.isEmpty ? 8 : 10,
+            horizontal: label.isEmpty ? 6 : 8,
             vertical: 0,
           ),
           visualDensity: VisualDensity.compact,
@@ -1962,7 +2986,16 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
             borderRadius: BorderRadius.circular(999),
           ),
         ),
-        icon: Icon(icon, size: 16),
+        icon: avatarText == null
+            ? Icon(icon, size: 15)
+            : Text(
+                avatarText,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: foregroundColor,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.1,
+                ),
+              ),
         label: label.isEmpty
             ? const SizedBox.shrink()
             : Text(
@@ -1972,6 +3005,37 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildConversationAvatarButton(
+    BuildContext context, {
+    required String fullName,
+    required VoidCallback onPressed,
+    required bool dark,
+  }) {
+    final primaryColor = dark ? AppTheme.darkAccent : AppTheme.cobalt;
+
+    return SizedBox.square(
+      dimension: 28,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        visualDensity: VisualDensity.compact,
+        onPressed: onPressed,
+        icon: CircleAvatar(
+          radius: 14,
+          backgroundColor: primaryColor.withValues(alpha: 0.15),
+          child: Text(
+            getInitials(fullName),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: primaryColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1986,118 +3050,200 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (BuildContext modalContext) {
-        return SafeArea(
-          top: false,
-          child: DecoratedBox(
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F1216),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-            ),
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                top: 14,
-                right: 16,
-                bottom: 16 + MediaQuery.viewInsetsOf(modalContext).bottom,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '${request.contactFullName} profile',
-                      style: Theme.of(modalContext).textTheme.titleLarge
-                          ?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
+        var sheetRequest = request;
+
+        return StatefulBuilder(
+          builder: (BuildContext modalContext, StateSetter setModalState) {
+            final sheetComposerEnabled =
+                sheetRequest.assignedStaff != null &&
+                sheetRequest.status != 'closed';
+
+            return SafeArea(
+              top: false,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  color: Color(0xFF0F1216),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    top: 14,
+                    right: 16,
+                    bottom: 16 + MediaQuery.viewInsetsOf(modalContext).bottom,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Center(
+                          child: Container(
+                            width: 44,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
                           ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Reference details and quick actions for this request.',
-                      style: Theme.of(modalContext).textTheme.bodyMedium
-                          ?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.62),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '${sheetRequest.contactFullName} profile',
+                          style: Theme.of(modalContext).textTheme.titleLarge
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Reference details and quick actions for this request.',
+                          style: Theme.of(modalContext).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.62),
+                              ),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildRequestBriefCard(
+                          modalContext,
+                          sheetRequest,
+                          composerEnabled: sheetComposerEnabled,
+                          showClockAction: _canCurrentStaffClockRequest(
+                            sheetRequest,
                           ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildRequestBriefCard(
-                      modalContext,
-                      request,
-                      composerEnabled: composerEnabled,
-                    ),
-                    if (composerEnabled) ...<Widget>[
-                      const SizedBox(height: 16),
-                      _StaffChatActionTray(
-                        request: request,
-                        isSendingUpdateRequest: _sendingMessageIds.contains(
-                          request.id,
+                          isClocking: _clockingRequestIds.contains(
+                            sheetRequest.id,
+                          ),
+                          onClockAction: () async {
+                            final action =
+                                _activeCurrentStaffWorkLog(sheetRequest) == null
+                                ? 'clock_in'
+                                : 'clock_out';
+                            final updatedRequest = await _clockRequestWork(
+                              sheetRequest,
+                              action,
+                            );
+                            if (updatedRequest != null) {
+                              setModalState(
+                                () => sheetRequest = updatedRequest,
+                              );
+                            }
+                          },
                         ),
-                        isSendingInvoice: _sendingInvoiceIds.contains(
-                          request.id,
-                        ),
-                        isReviewingPaymentProof: _reviewingPaymentProofIds
-                            .contains(request.id),
-                        onAskCustomerUpdate: () {
-                          Navigator.of(modalContext).pop();
-                          _sendCustomerUpdateRequest(request);
-                        },
-                        onSendInvoice: () {
-                          Navigator.of(modalContext).pop();
-                          _sendInvoice(request);
-                        },
-                        onOpenPaymentProof:
-                            request.invoice?.proof?.fileUrl == null
-                            ? null
-                            : () {
-                                Navigator.of(modalContext).pop();
-                                _openPaymentProof(request);
-                              },
-                        onOpenReceipt: request.invoice?.receiptUrl == null
-                            ? null
-                            : () {
-                                Navigator.of(modalContext).pop();
-                                _openReceipt(request);
-                              },
-                        onApprovePaymentProof:
-                            request.invoice?.isProofSubmitted == true
-                            ? () {
-                                Navigator.of(modalContext).pop();
-                                _reviewPaymentProof(
-                                  request,
-                                  decision: 'approved',
-                                );
-                              }
-                            : null,
-                        onRejectPaymentProof:
-                            request.invoice?.isProofSubmitted == true
-                            ? () {
-                                Navigator.of(modalContext).pop();
-                                _reviewPaymentProof(
-                                  request,
-                                  decision: 'rejected',
-                                );
-                              }
-                            : null,
-                      ),
-                    ],
-                  ],
+                        if (sheetComposerEnabled) ...<Widget>[
+                          const SizedBox(height: 16),
+                          Builder(
+                            builder: (BuildContext _) {
+                              final ownEstimation = _currentUserEstimationFor(
+                                sheetRequest,
+                              );
+                              return _StaffChatActionTray(
+                                request: sheetRequest,
+                                isCustomerCareUser: _isCustomerCareUser,
+                                isSendingUpdateRequest: _sendingMessageIds
+                                    .contains(sheetRequest.id),
+                                isSendingInvoice: _sendingInvoiceIds.contains(
+                                  sheetRequest.id,
+                                ),
+                                hasPendingCustomerUpdateRequest:
+                                    _hasPendingCustomerUpdateRequest(
+                                      sheetRequest,
+                                    ),
+                                ownEstimation: ownEstimation,
+                                isEstimationLocked:
+                                    sheetRequest.estimationLocked,
+                                isReviewingPaymentProof:
+                                    _reviewingPaymentProofIds.contains(
+                                      sheetRequest.id,
+                                    ),
+                                onAskCustomerUpdate: () {
+                                  Navigator.of(modalContext).pop();
+                                  _sendCustomerUpdateRequest(sheetRequest);
+                                },
+                                onClearCustomerUpdate: () {
+                                  Navigator.of(modalContext).pop();
+                                  _clearCustomerUpdateRequest(sheetRequest);
+                                },
+                                onEditEstimate: () {
+                                  Navigator.of(modalContext).pop();
+                                  _editEstimation(sheetRequest);
+                                },
+                                canClockRequest: _canCurrentStaffClockRequest(
+                                  sheetRequest,
+                                ),
+                                isClockingRequest: _clockingRequestIds.contains(
+                                  sheetRequest.id,
+                                ),
+                                hasActiveClockLog:
+                                    _activeCurrentStaffWorkLog(sheetRequest) !=
+                                    null,
+                                onClockRequest: () async {
+                                  final action =
+                                      _activeCurrentStaffWorkLog(
+                                            sheetRequest,
+                                          ) ==
+                                          null
+                                      ? 'clock_in'
+                                      : 'clock_out';
+                                  Navigator.of(modalContext).pop();
+                                  await _clockRequestWork(sheetRequest, action);
+                                },
+                                onBookSiteReview: () {
+                                  Navigator.of(modalContext).pop();
+                                  _bookSiteReview(sheetRequest);
+                                },
+                                onRunFinalEstimate: () {
+                                  Navigator.of(modalContext).pop();
+                                  _runFinalEstimate(sheetRequest);
+                                },
+                                onOpenPaymentProof:
+                                    sheetRequest.invoice?.proof?.fileUrl == null
+                                    ? null
+                                    : () {
+                                        Navigator.of(modalContext).pop();
+                                        _openPaymentProof(sheetRequest);
+                                      },
+                                onOpenReceipt:
+                                    sheetRequest.invoice?.receiptUrl == null
+                                    ? null
+                                    : () {
+                                        Navigator.of(modalContext).pop();
+                                        _openReceipt(sheetRequest);
+                                      },
+                                onApprovePaymentProof:
+                                    sheetRequest.invoice?.isProofSubmitted ==
+                                        true
+                                    ? () {
+                                        Navigator.of(modalContext).pop();
+                                        _reviewPaymentProof(
+                                          sheetRequest,
+                                          decision: 'approved',
+                                        );
+                                      }
+                                    : null,
+                                onRejectPaymentProof:
+                                    sheetRequest.invoice?.isProofSubmitted ==
+                                        true
+                                    ? () {
+                                        Navigator.of(modalContext).pop();
+                                        _reviewPaymentProof(
+                                          sheetRequest,
+                                          decision: 'rejected',
+                                        );
+                                      }
+                                    : null,
+                              );
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -2159,7 +3305,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Workflow',
+                        _t(en: 'Workflow', de: 'Ablauf'),
                         style: Theme.of(modalContext).textTheme.titleLarge
                             ?.copyWith(
                               color: Colors.white,
@@ -2168,7 +3314,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Update the job status without covering the chat.',
+                        _t(
+                          en: 'Update the job status without covering the chat.',
+                          de: 'Aktualisieren Sie den Auftragsstatus, ohne den Chat zu überdecken.',
+                        ),
                         style: Theme.of(modalContext).textTheme.bodyMedium
                             ?.copyWith(
                               color: Colors.white.withValues(alpha: 0.62),
@@ -2179,44 +3328,68 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                         initialValue: localSelectedStatus,
                         hint: Text(
                           request.status == 'assigned'
-                              ? 'Select next status'
-                              : 'Choose workflow status',
+                              ? _t(
+                                  en: 'Select next status',
+                                  de: 'Nächsten Status wählen',
+                                )
+                              : _t(
+                                  en: 'Choose workflow status',
+                                  de: 'Ablaufstatus wählen',
+                                ),
                         ),
-                        decoration: const InputDecoration(
-                          labelText: 'Status',
+                        decoration: InputDecoration(
+                          labelText: _t(en: 'Status', de: 'Status'),
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 12,
                           ),
                         ),
-                        items: const <DropdownMenuItem<String>>[
+                        items: <DropdownMenuItem<String>>[
                           DropdownMenuItem(
                             value: 'under_review',
-                            child: Text('Under review'),
+                            child: Text(
+                              _t(en: 'Under review', de: 'In Prüfung'),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'quoted',
-                            child: Text('Quoted'),
+                            child: Text(
+                              _t(en: 'Quoted', de: 'Angebot gesendet'),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'appointment_confirmed',
-                            child: Text('Appointment confirmed'),
+                            child: Text(
+                              _t(
+                                en: 'Appointment confirmed',
+                                de: 'Termin bestätigt',
+                              ),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'pending_start',
-                            child: Text('Pending start'),
+                            child: Text(
+                              _t(en: 'Pending start', de: 'Start ausstehend'),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'project_started',
-                            child: Text('Project started'),
+                            child: Text(
+                              _t(
+                                en: 'Project started',
+                                de: 'Projekt gestartet',
+                              ),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'work_done',
-                            child: Text('Work done'),
+                            child: Text(
+                              _t(en: 'Work done', de: 'Arbeit erledigt'),
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'closed',
-                            child: Text('Closed'),
+                            child: Text(_t(en: 'Closed', de: 'Geschlossen')),
                           ),
                         ],
                         onChanged: (String? value) {
@@ -2243,7 +3416,11 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                                   }
                                 }
                               : null,
-                          child: Text(isSavingStatus ? 'Saving...' : 'Save'),
+                          child: Text(
+                            isSavingStatus
+                                ? _t(en: 'Saving...', de: 'Speichert...')
+                                : _t(en: 'Save', de: 'Speichern'),
+                          ),
                         ),
                       ),
                     ],
@@ -2261,6 +3438,9 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     BuildContext context,
     ServiceRequestModel request, {
     required bool composerEnabled,
+    bool showClockAction = false,
+    bool isClocking = false,
+    VoidCallback? onClockAction,
   }) {
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -2292,13 +3472,19 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        'Customer request brief',
+                        _t(
+                          en: 'Customer request brief',
+                          de: 'Kundenanfrage kompakt',
+                        ),
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Reference details for this chat. Download it or review the latest request context.',
+                        _t(
+                          en: 'Reference details for this chat. Download it or review the latest request context.',
+                          de: 'Referenzdetails zu diesem Chat. Laden Sie sie herunter oder prüfen Sie den aktuellen Anfragestatus.',
+                        ),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppTheme.ink.withValues(alpha: 0.66),
                         ),
@@ -2338,51 +3524,122 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
               children: <Widget>[
                 _RequestBriefItem(
                   icon: Icons.person_outline_rounded,
-                  label: 'Customer',
+                  label: _t(en: 'Customer', de: 'Kunde'),
                   value: request.contactFullName.isEmpty
-                      ? 'Not provided'
+                      ? _t(en: 'Not provided', de: 'Nicht angegeben')
                       : request.contactFullName,
                 ),
                 _RequestBriefItem(
                   icon: Icons.mail_outline_rounded,
-                  label: 'Email',
+                  label: _t(en: 'Email', de: 'E-Mail'),
                   value: request.contactEmail.isEmpty
-                      ? 'Not provided'
+                      ? _t(en: 'Not provided', de: 'Nicht angegeben')
                       : request.contactEmail,
                 ),
                 _RequestBriefItem(
                   icon: Icons.call_outlined,
-                  label: 'Phone',
+                  label: _t(en: 'Phone', de: 'Telefon'),
                   value: request.contactPhone.isEmpty
-                      ? 'Not provided'
+                      ? _t(en: 'Not provided', de: 'Nicht angegeben')
                       : request.contactPhone,
                 ),
                 _RequestBriefItem(
                   icon: Icons.place_outlined,
-                  label: 'Address',
+                  label: _t(en: 'Address', de: 'Adresse'),
                   value: _requestAddress(request),
                 ),
                 _RequestBriefItem(
                   icon: Icons.event_outlined,
-                  label: 'Preferred date',
+                  label: _t(en: 'Preferred date', de: 'Wunschtermin'),
                   value: _formatRequestDate(request.preferredDate),
                 ),
                 _RequestBriefItem(
                   icon: Icons.schedule_rounded,
-                  label: 'Time window',
+                  label: _t(en: 'Time window', de: 'Zeitfenster'),
                   value: request.preferredTimeWindow.isEmpty
-                      ? 'Not provided'
+                      ? _t(en: 'Not provided', de: 'Nicht angegeben')
                       : request.preferredTimeWindow,
                 ),
                 _RequestBriefItem(
+                  icon: Icons.event_available_rounded,
+                  label: _t(en: 'Estimated start', de: 'Geplanter Start'),
+                  value: _formatEstimatedScheduleBoundary(
+                    request,
+                    isStart: true,
+                  ),
+                ),
+                _RequestBriefItem(
+                  icon: Icons.event_busy_rounded,
+                  label: _t(en: 'Estimated finish', de: 'Geplantes Ende'),
+                  value: _formatEstimatedScheduleBoundary(
+                    request,
+                    isStart: false,
+                  ),
+                ),
+                _RequestBriefItem(
+                  icon: Icons.event_note_rounded,
+                  label: _t(
+                    en: 'Estimated review date',
+                    de: 'Geplantes Besichtigungsdatum',
+                  ),
+                  value: _formatScheduledSiteReviewDate(request),
+                ),
+                _RequestBriefItem(
+                  icon: Icons.more_time_rounded,
+                  label: _t(
+                    en: 'Estimated review time',
+                    de: 'Geplante Besichtigungszeit',
+                  ),
+                  value: _formatScheduledSiteReviewTime(request),
+                ),
+                _RequestBriefItem(
+                  icon: Icons.rate_review_outlined,
+                  label: _t(
+                    en: 'Review clock in',
+                    de: 'Besichtigung eingestempelt',
+                  ),
+                  value: _formatRequestWorkLogLabel(
+                    _firstWorkLog(request, siteReviewOnly: true),
+                    _firstWorkLog(request, siteReviewOnly: true)?.startedAt,
+                  ),
+                ),
+                _RequestBriefItem(
+                  icon: Icons.rate_review_rounded,
+                  label: _t(
+                    en: 'Review clock out',
+                    de: 'Besichtigung ausgestempelt',
+                  ),
+                  value: _formatRequestWorkLogLabel(
+                    _latestStoppedWorkLog(request, siteReviewOnly: true),
+                    _latestStoppedWorkLog(
+                      request,
+                      siteReviewOnly: true,
+                    )?.stoppedAt,
+                  ),
+                ),
+                _RequestBriefItem(
                   icon: Icons.play_circle_outline_rounded,
-                  label: 'Project started',
-                  value: _formatRequestDateTime(request.projectStartedAt),
+                  label: _t(en: 'Job clock in', de: 'Job eingestempelt'),
+                  value: _formatRequestWorkLogLabel(
+                    _firstWorkLog(request, siteReviewOnly: false),
+                    request.projectStartedAt ??
+                        _firstWorkLog(
+                          request,
+                          siteReviewOnly: false,
+                        )?.startedAt,
+                  ),
                 ),
                 _RequestBriefItem(
                   icon: Icons.task_alt_rounded,
-                  label: 'Work finished',
-                  value: _formatRequestDateTime(request.finishedAt),
+                  label: _t(en: 'Job clock out', de: 'Job ausgestempelt'),
+                  value: _formatRequestWorkLogLabel(
+                    _latestStoppedWorkLog(request, siteReviewOnly: false),
+                    request.finishedAt ??
+                        _latestStoppedWorkLog(
+                          request,
+                          siteReviewOnly: false,
+                        )?.stoppedAt,
+                  ),
                 ),
               ],
             ),
@@ -2399,7 +3656,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Original request',
+                      _t(en: 'Original request', de: 'Originalanfrage'),
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: AppTheme.ink,
                         fontWeight: FontWeight.w700,
@@ -2408,7 +3665,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                     const SizedBox(height: 8),
                     Text(
                       request.message.trim().isEmpty
-                          ? 'No customer request note was provided.'
+                          ? _t(
+                              en: 'No customer request note was provided.',
+                              de: 'Es wurde keine Kundennotiz angegeben.',
+                            )
                           : request.message.trim(),
                       style: Theme.of(
                         context,
@@ -2426,20 +3686,136 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                 FilledButton.tonalIcon(
                   onPressed: () => _downloadRequestBrief(request),
                   icon: const Icon(Icons.download_rounded),
-                  label: const Text('Download brief'),
+                  label: Text(_t(en: 'Download brief', de: 'Briefing laden')),
                 ),
+                if (showClockAction)
+                  FilledButton.icon(
+                    onPressed: isClocking ? null : onClockAction,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.cobalt,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: Icon(
+                      isClocking
+                          ? Icons.more_horiz_rounded
+                          : _activeCurrentStaffWorkLog(request) == null
+                          ? Icons.login_rounded
+                          : Icons.logout_rounded,
+                    ),
+                    label: Text(
+                      isClocking
+                          ? _t(en: 'Saving...', de: 'Speichert...')
+                          : _activeCurrentStaffWorkLog(request) == null
+                          ? _t(en: 'Clock in', de: 'Einstempeln')
+                          : _t(en: 'Clock out', de: 'Ausstempeln'),
+                    ),
+                  ),
               ],
             ),
+            if (showClockAction) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(
+                _clockingSummary(request),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.ink.withValues(alpha: 0.68),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             if (!composerEnabled) ...<Widget>[
               const SizedBox(height: 10),
               Text(
-                'Attend the queue item first before sending an update request to the client.',
+                _t(
+                  en: 'Attend the queue item first before sending an update request to the client.',
+                  de: 'Übernehmen Sie zuerst diesen Warteschlangeneintrag, bevor Sie eine Aktualisierungsanfrage an den Kunden senden.',
+                ),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.ink.withValues(alpha: 0.62),
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConversationClockStrip(ServiceRequestModel request) {
+    final hasActiveClockLog = _activeCurrentStaffWorkLog(request) != null;
+    final isClockingRequest = _clockingRequestIds.contains(request.id);
+    final isSiteReviewClockAction = request.isSiteReviewPending;
+    final actionLabel = isSiteReviewClockAction
+        ? hasActiveClockLog
+              ? _t(en: 'Clock out review', de: 'Besichtigung ausstempeln')
+              : _t(en: 'Clock in review', de: 'Zur Besichtigung einstempeln')
+        : hasActiveClockLog
+        ? _t(en: 'Clock out work', de: 'Arbeit ausstempeln')
+        : _t(en: 'Clock in work', de: 'Arbeit einstempeln');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.darkSurfaceMuted.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.darkBorder),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    hasActiveClockLog
+                        ? Icons.timer_outlined
+                        : Icons.schedule_rounded,
+                    color: AppTheme.cobalt,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _clockingSummary(request),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            FilledButton.icon(
+              onPressed: isClockingRequest
+                  ? null
+                  : () => _clockRequestWork(
+                      request,
+                      hasActiveClockLog ? 'clock_out' : 'clock_in',
+                    ),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.cobalt,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                minimumSize: const Size(0, 38),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              icon: Icon(
+                isClockingRequest
+                    ? Icons.more_horiz_rounded
+                    : hasActiveClockLog
+                    ? Icons.logout_rounded
+                    : Icons.login_rounded,
+                size: 18,
+              ),
+              label: Text(actionLabel),
+            ),
           ],
         ),
       ),
@@ -2460,7 +3836,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     if (request == null) {
       return DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFF0D0E10),
+          color: AppTheme.darkPage,
           borderRadius: surfaceRadius,
           border: edgeToEdge
               ? null
@@ -2468,7 +3844,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         ),
         child: Center(
           child: Text(
-            'Pick a queue thread to continue.',
+            _t(
+              en: 'Pick a queue thread to continue.',
+              de: 'Wählen Sie einen Warteschlangen-Chat zum Fortfahren.',
+            ),
             style: Theme.of(
               context,
             ).textTheme.bodyLarge?.copyWith(color: Colors.white),
@@ -2493,7 +3872,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0E10),
+        color: AppTheme.darkPage,
         borderRadius: surfaceRadius,
         border: edgeToEdge
             ? null
@@ -2526,9 +3905,9 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: <Color>[
-                    const Color(0xFF111214),
+                    AppTheme.darkSurface,
                     AppTheme.pine.withValues(alpha: 0.08),
-                    const Color(0xFF0D0E10),
+                    AppTheme.darkPage,
                   ],
                 ),
               ),
@@ -2549,46 +3928,112 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       },
                       child: SingleChildScrollView(
                         controller: _requestThreadScrollController,
-                        padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
-                        child: RequestThreadSection(
-                          key: ValueKey<String>(request.id),
-                          messages: request.messages,
-                          viewerRole: 'staff',
-                          dark: true,
-                          emptyLabel: 'No thread messages yet.',
-                          messageActionBuilder: (RequestMessageModel message) =>
-                              _buildStaffThreadMessageAction(request, message),
+                        padding: const EdgeInsets.fromLTRB(22, 10, 22, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            RequestThreadSection(
+                              key: ValueKey<String>(request.id),
+                              messages: request.messages,
+                              viewerRole: 'staff',
+                              dark: true,
+                              emptyLabel: _t(
+                                en: 'No thread messages yet.',
+                                de: 'Noch keine Chat-Nachrichten vorhanden.',
+                              ),
+                              messageActionBuilder:
+                                  (RequestMessageModel message) =>
+                                      _buildStaffThreadMessageAction(
+                                        request,
+                                        message,
+                                      ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-                    child: RequestMessageComposer(
-                      controller: controller,
-                      leadingActions: <Widget>[
-                        _StaffComposerActionButton(
-                          tooltip: 'Upload file',
-                          icon: isUploadingAttachment
-                              ? Icons.more_horiz_rounded
-                              : Icons.attach_file_rounded,
-                          onPressed: !composerEnabled || isUploadingAttachment
-                              ? null
-                              : () => _uploadRequestAttachment(request),
-                        ),
-                      ],
-                      hintText: composerEnabled
-                          ? aiCoverActive
-                                ? 'Reply here to take the chat back from Naima'
-                                : 'Reply to the customer here'
-                          : 'Attend the queue before replying',
-                      buttonLabel: aiCoverActive
-                          ? 'Send and resume'
-                          : 'Send reply',
-                      isSubmitting: isSending,
-                      dark: true,
-                      isEnabled: composerEnabled,
-                      onSubmit: () => _sendMessage(request),
+                    child: Builder(
+                      builder: (BuildContext context) {
+                        final isRefiningMessage = _refiningMessageIds.contains(
+                          request.id,
+                        );
+                        final isComposerBusy =
+                            isSending ||
+                            isRefiningMessage ||
+                            isUploadingAttachment;
+
+                        return Column(
+                          children: <Widget>[
+                            if (_canCurrentStaffClockRequest(
+                              request,
+                            )) ...<Widget>[
+                              _buildConversationClockStrip(request),
+                              const SizedBox(height: 10),
+                            ],
+                            RequestMessageComposer(
+                              controller: controller,
+                              leadingActions: <Widget>[
+                                _StaffComposerActionButton(
+                                  tooltip: _t(
+                                    en: isRefiningMessage
+                                        ? 'Naima AI is refining your reply'
+                                        : 'Naima AI can read this conversation and refine your reply',
+                                    de: isRefiningMessage
+                                        ? 'Naima KI verfeinert gerade Ihre Antwort'
+                                        : 'Naima KI kann diesen Verlauf lesen und Ihre Antwort verfeinern',
+                                  ),
+                                  icon: isRefiningMessage
+                                      ? Icons.more_horiz_rounded
+                                      : Icons.auto_awesome_rounded,
+                                  accentColor: AppTheme.pine,
+                                  onPressed: !composerEnabled || isComposerBusy
+                                      ? null
+                                      : () => _refineDraftWithAi(request),
+                                ),
+                                _StaffComposerActionButton(
+                                  tooltip: _t(
+                                    en: 'Upload file',
+                                    de: 'Datei hochladen',
+                                  ),
+                                  icon: isUploadingAttachment
+                                      ? Icons.more_horiz_rounded
+                                      : Icons.attach_file_rounded,
+                                  onPressed: !composerEnabled || isComposerBusy
+                                      ? null
+                                      : () => _uploadRequestAttachment(request),
+                                ),
+                              ],
+                              hintText: composerEnabled
+                                  ? aiCoverActive
+                                        ? _t(
+                                            en: 'Reply here to take the chat back from Naima',
+                                            de: 'Hier antworten, um den Chat von Naima zurückzunehmen',
+                                          )
+                                        : _t(
+                                            en: 'Reply to the customer here',
+                                            de: 'Hier dem Kunden antworten',
+                                          )
+                                  : _t(
+                                      en: 'Attend the queue before replying',
+                                      de: 'Übernehmen Sie die Warteschlange, bevor Sie antworten',
+                                    ),
+                              buttonLabel: aiCoverActive
+                                  ? _t(
+                                      en: 'Send and resume',
+                                      de: 'Senden und fortsetzen',
+                                    )
+                                  : _t(en: 'Send reply', de: 'Antwort senden'),
+                              isSubmitting: isComposerBusy,
+                              dark: true,
+                              isEnabled: composerEnabled,
+                              onSubmit: () => _sendMessage(request),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -2609,27 +4054,27 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
     return <WorkspaceBottomNavItem>[
       WorkspaceBottomNavItem(
-        label: 'Queue',
+        label: _t(en: 'Queue', de: 'Warteschlange'),
         icon: Icons.inbox_rounded,
         badgeText: '${bundle.waitingQueueCount}',
       ),
       WorkspaceBottomNavItem(
-        label: 'Active',
+        label: _t(en: 'Active', de: 'Aktiv'),
         icon: Icons.support_agent_rounded,
         badgeText: '${bundle.assignedCount}',
       ),
       WorkspaceBottomNavItem(
-        label: 'Pipeline',
+        label: _t(en: 'Pipeline', de: 'Ablauf'),
         icon: Icons.rule_folder_rounded,
         badgeText: '$pipelineCount',
       ),
       WorkspaceBottomNavItem(
-        label: 'Closed',
+        label: _t(en: 'Closed', de: 'Geschlossen'),
         icon: Icons.done_all_rounded,
         badgeText: '${_filterCount(bundle, _StaffInboxFilter.closed)}',
       ),
       WorkspaceBottomNavItem(
-        label: 'Chats',
+        label: _t(en: 'Chats', de: 'Chats'),
         icon: Icons.forum_rounded,
         badgeText: '$internalChatUnreadCount',
         badgeBackgroundColor: const Color(0xFFE04F5F),
@@ -2640,16 +4085,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
-      next.whenData((event) {
-        if (!event.affectsRequests) {
-          return;
-        }
-
-        ref.invalidate(staffDashboardProvider);
-      });
-    });
-
+    ref.watch(appLanguageProvider);
     final bundleAsync = ref.watch(staffDashboardProvider);
     final authState = ref.watch(authControllerProvider);
     final internalChatUnreadAsync = ref.watch(
@@ -2659,10 +4095,10 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final pagePadding = width < 600 ? 12.0 : 20.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0E10),
+      backgroundColor: AppTheme.darkPage,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D0E10),
-        foregroundColor: Colors.white,
+        backgroundColor: AppTheme.darkPage,
+        foregroundColor: AppTheme.darkText,
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
@@ -2671,23 +4107,23 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
           TextSpan(
             children: <InlineSpan>[
               TextSpan(
-                text: 'Staff Queue',
+                text: _t(en: 'Staff Queue', de: 'Team-Warteschlange'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.96),
+                  color: AppTheme.darkText,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               TextSpan(
                 text: ' · ',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.4),
+                  color: AppTheme.darkTextSoft,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               TextSpan(
-                text: authState.user?.fullName ?? 'Staff',
+                text: authState.user?.fullName ?? _t(en: 'Staff', de: 'Team'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.72),
+                  color: AppTheme.darkTextMuted,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -2697,15 +4133,32 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: <Widget>[
-          IconButton(
-            tooltip: 'Logout',
+          WorkspaceCalendarActionButton(
+            tooltip: _t(en: 'Shared calendar', de: 'Gemeinsamer Kalender'),
+            onPressed: () => context.go('/staff/calendar'),
+            dark: true,
+          ),
+          WorkspaceProfileActionButton(
+            tooltip: _t(en: 'Profile', de: 'Profil'),
+            onPressed: () => context.go('/staff/profile'),
+            displayName: authState.user?.fullName ?? '',
+            dark: true,
+          ),
+          AppLanguageToggle(
+            language: _language,
+            onChanged: ref.read(appLanguageProvider.notifier).setLanguage,
+            dark: true,
+            compact: true,
+          ),
+          WorkspaceLogoutActionButton(
+            tooltip: _t(en: 'Logout', de: 'Abmelden'),
             onPressed: () async {
               await ref.read(authControllerProvider.notifier).logout();
               if (context.mounted) {
                 context.go('/');
               }
             },
-            icon: const Icon(Icons.logout_rounded),
+            dark: true,
           ),
         ],
       ),
@@ -2796,7 +4249,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (Object error, StackTrace stackTrace) => DecoratedBox(
           decoration: BoxDecoration(
-            color: const Color(0xFF0D0E10),
+            color: AppTheme.darkPage,
             borderRadius: BorderRadius.circular(30),
           ),
           child: Center(
@@ -2839,14 +4292,17 @@ class _StaffComposerActionButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    this.accentColor,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback? onPressed;
+  final Color? accentColor;
 
   @override
   Widget build(BuildContext context) {
+    final resolvedAccentColor = accentColor ?? Colors.white;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: onPressed == null ? 0.05 : 0.08),
@@ -2858,7 +4314,9 @@ class _StaffComposerActionButton extends StatelessWidget {
         onPressed: onPressed,
         icon: Icon(
           icon,
-          color: Colors.white.withValues(alpha: onPressed == null ? 0.38 : 0.9),
+          color: onPressed == null
+              ? resolvedAccentColor.withValues(alpha: 0.38)
+              : resolvedAccentColor.withValues(alpha: 0.9),
         ),
       ),
     );
@@ -3009,14 +4467,25 @@ class _RequestBriefItem extends StatelessWidget {
   }
 }
 
-class _StaffChatActionTray extends StatelessWidget {
+class _StaffChatActionTray extends ConsumerWidget {
   const _StaffChatActionTray({
     required this.request,
+    required this.isCustomerCareUser,
     required this.isSendingUpdateRequest,
     required this.isSendingInvoice,
+    required this.hasPendingCustomerUpdateRequest,
+    required this.ownEstimation,
+    required this.isEstimationLocked,
     required this.isReviewingPaymentProof,
     required this.onAskCustomerUpdate,
-    required this.onSendInvoice,
+    required this.onClearCustomerUpdate,
+    required this.onEditEstimate,
+    required this.canClockRequest,
+    required this.isClockingRequest,
+    required this.hasActiveClockLog,
+    required this.onClockRequest,
+    required this.onBookSiteReview,
+    required this.onRunFinalEstimate,
     required this.onOpenPaymentProof,
     required this.onOpenReceipt,
     required this.onApprovePaymentProof,
@@ -3024,28 +4493,140 @@ class _StaffChatActionTray extends StatelessWidget {
   });
 
   final ServiceRequestModel request;
+  final bool isCustomerCareUser;
   final bool isSendingUpdateRequest;
   final bool isSendingInvoice;
+  final bool hasPendingCustomerUpdateRequest;
+  final RequestEstimationModel? ownEstimation;
+  final bool isEstimationLocked;
   final bool isReviewingPaymentProof;
   final VoidCallback onAskCustomerUpdate;
-  final VoidCallback onSendInvoice;
+  final VoidCallback onClearCustomerUpdate;
+  final VoidCallback onEditEstimate;
+  final bool canClockRequest;
+  final bool isClockingRequest;
+  final bool hasActiveClockLog;
+  final VoidCallback onClockRequest;
+  final VoidCallback onBookSiteReview;
+  final VoidCallback onRunFinalEstimate;
   final VoidCallback? onOpenPaymentProof;
   final VoidCallback? onOpenReceipt;
   final VoidCallback? onApprovePaymentProof;
   final VoidCallback? onRejectPaymentProof;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final invoice = request.invoice;
+    final customerUpdatesLocked = invoice != null;
     final statusLabel = invoice == null
         ? ''
-        : requestStatusLabelFor(invoice.status);
+        : requestStatusLabelFor(invoice.status, language: language);
+    final showSiteReviewFlow =
+        !isCustomerCareUser && request.isSiteReviewRequired;
+    final hasOwnEstimation = ownEstimation != null;
+    final hasSiteReviewBooking =
+        ownEstimation?.hasSiteReviewBooking == true ||
+        request.siteReviewReadyEstimation != null;
+    final isSiteReviewBookingLocked =
+        invoice?.isSiteReview == true &&
+        request.assessmentStatus != 'site_visit_completed';
+    final isSiteReviewClockAction = request.isSiteReviewPending;
+    final hasOwnFinalEstimate =
+        ownEstimation?.stage == 'final' &&
+        ((ownEstimation?.estimatedStartDate != null &&
+                ownEstimation?.estimatedEndDate != null) ||
+            ownEstimation?.isComplete == true);
+    final estimationActionLabel = isSendingInvoice
+        ? language.pick(
+            en: 'Saving estimate...',
+            de: 'Schätzung wird gespeichert...',
+          )
+        : isCustomerCareUser
+        ? language.pick(
+            en: 'Customer care sends from chat',
+            de: 'Kundenservice sendet im Chat',
+          )
+        : isEstimationLocked
+        ? language.pick(
+            en: 'Estimate locked after quoted',
+            de: 'Schätzung nach Angebot gesperrt',
+          )
+        : hasOwnEstimation
+        ? language.pick(en: 'Update estimate', de: 'Schätzung aktualisieren')
+        : language.pick(en: 'Create estimate', de: 'Schätzung erstellen');
+    final estimationSummary = invoice == null
+        ? isCustomerCareUser
+              ? language.pick(
+                  en: 'Customer care does not edit field estimates. Wait for staff updates and send only from the quotation-ready chat card.',
+                  de: 'Der Kundenservice bearbeitet keine Feldeinschätzungen. Warten Sie auf Mitarbeiter-Updates und senden Sie nur über die angebotbereite Chat-Karte.',
+                )
+              : isEstimationLocked
+              ? language.pick(
+                  en: 'Customer care already marked this request quoted, so the estimate is now locked.',
+                  de: 'Der Kundenservice hat diese Anfrage bereits als angeboten markiert, daher ist die Schätzung nun gesperrt.',
+                )
+              : language.pick(
+                  en: 'Create or update your estimate here. Admin reviews internally, then customer care sends from the request chat.',
+                  de: 'Erstellen oder aktualisieren Sie hier Ihre Schätzung. Admin prüft intern, danach sendet der Kundenservice aus dem Anfrage-Chat.',
+                )
+        : language.pick(
+            en: 'Quotation ${invoice.invoiceNumber} is ${statusLabel.toLowerCase()}.',
+            de: 'Angebot ${invoice.invoiceNumber} ist ${statusLabel.toLowerCase()}.',
+          );
+    final siteReviewActionLabel = hasSiteReviewBooking
+        ? language.pick(
+            en: 'Update scheduled review',
+            de: 'Geplante Besichtigung aktualisieren',
+          )
+        : language.pick(en: 'Book scheduled review', de: 'Besichtigung buchen');
+    final finalEstimateActionLabel = hasOwnFinalEstimate
+        ? language.pick(
+            en: 'Update estimate after review',
+            de: 'Schätzung nach Besichtigung aktualisieren',
+          )
+        : language.pick(
+            en: 'Run estimate after review',
+            de: 'Schätzung nach Besichtigung starten',
+          );
+    final stageSummary = switch ((invoice != null, showSiteReviewFlow)) {
+      (true, _) => estimationSummary,
+      (false, true) when request.isSiteReviewReadyForCustomerCare => language.pick(
+        en: 'Next: customer care sends the reviewed site review package to the customer.',
+        de: 'Als Nächstes sendet der Kundenservice das geprüfte Besichtigungspaket an den Kunden.',
+      ),
+      (false, true) when isSiteReviewBookingLocked => language.pick(
+        en: 'Next: wait for the booked review to happen. Clock in and out on the visit day, then run the final estimate.',
+        de: 'Als Nächstes warten Sie auf die gebuchte Besichtigung. Stempeln Sie am Einsatztag ein und aus und erstellen Sie dann die finale Schätzung.',
+      ),
+      (false, true)
+          when request.isSiteReviewReadyForInternalReview ||
+              request.hasQuoteReview =>
+        language.pick(
+          en: 'Next: admin updates the review package, then customer care sends it.',
+          de: 'Als Nächstes aktualisiert der Admin das Prüfungspaket, dann sendet der Kundenservice es.',
+        ),
+      (false, true) when request.assessmentStatus == 'site_visit_completed' =>
+        language.pick(
+          en: 'Next: submit the final estimate so admin can review it.',
+          de: 'Als Nächstes reichen Sie die finale Schätzung ein, damit der Admin sie prüfen kann.',
+        ),
+      (false, true) when hasSiteReviewBooking => language.pick(
+        en: 'Next: attend the review, clock in and out on the visit day, then run the final estimate.',
+        de: 'Als Nächstes nehmen Sie die Besichtigung wahr, stempeln am Einsatztag ein und aus und erstellen dann die finale Schätzung.',
+      ),
+      (false, true) => language.pick(
+        en: 'Next: book the review. Saving from that action marks it scheduled and puts it on the calendar.',
+        de: 'Als Nächstes buchen Sie die Besichtigung. Diese Aktion markiert sie als geplant und legt sie im Kalender an.',
+      ),
+      _ => estimationSummary,
+    };
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF121418),
+        color: AppTheme.darkPageRaised,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.darkBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -3053,7 +4634,7 @@ class _StaffChatActionTray extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Conversation actions',
+              language.pick(en: 'Conversation actions', de: 'Chat-Aktionen'),
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -3061,9 +4642,7 @@ class _StaffChatActionTray extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              invoice == null
-                  ? 'Keep the request moving without leaving the chat.'
-                  : 'Quotation ${invoice.invoiceNumber} is ${statusLabel.toLowerCase()}.',
+              stageSummary,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Colors.white.withValues(alpha: 0.62),
               ),
@@ -3074,7 +4653,7 @@ class _StaffChatActionTray extends StatelessWidget {
               runSpacing: 10,
               children: <Widget>[
                 OutlinedButton.icon(
-                  onPressed: isSendingUpdateRequest
+                  onPressed: isSendingUpdateRequest || customerUpdatesLocked
                       ? null
                       : onAskCustomerUpdate,
                   style: OutlinedButton.styleFrom(
@@ -3087,23 +4666,139 @@ class _StaffChatActionTray extends StatelessWidget {
                   icon: const Icon(Icons.edit_note_rounded),
                   label: Text(
                     isSendingUpdateRequest
-                        ? 'Sending update request...'
-                        : 'Ask client to update',
+                        ? language.pick(
+                            en: 'Sending update request...',
+                            de: 'Aktualisierungsanfrage wird gesendet...',
+                          )
+                        : customerUpdatesLocked
+                        ? language.pick(
+                            en: 'Customer updates locked after quoted',
+                            de: 'Kundenupdates nach Angebot gesperrt',
+                          )
+                        : language.pick(
+                            en: 'Ask client to update',
+                            de: 'Kunden um Update bitten',
+                          ),
                   ),
                 ),
-                FilledButton.tonalIcon(
-                  onPressed: isSendingInvoice ? null : onSendInvoice,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
-                    foregroundColor: Colors.white,
+                if (hasPendingCustomerUpdateRequest)
+                  OutlinedButton.icon(
+                    onPressed: isSendingUpdateRequest
+                        ? null
+                        : onClearCustomerUpdate,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.04),
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.task_alt_rounded),
+                    label: Text(
+                      isSendingUpdateRequest
+                          ? language.pick(
+                              en: 'Clearing update request...',
+                              de: 'Aktualisierungsanfrage wird entfernt...',
+                            )
+                          : language.pick(
+                              en: 'Clear update request',
+                              de: 'Aktualisierung entfernen',
+                            ),
+                    ),
                   ),
-                  icon: const Icon(Icons.receipt_long_rounded),
-                  label: Text(
-                    isSendingInvoice
-                        ? 'Sending quotation...'
-                        : 'Send quotation',
+                if (showSiteReviewFlow) ...<Widget>[
+                  FilledButton.tonalIcon(
+                    onPressed:
+                        isSendingInvoice ||
+                            isEstimationLocked ||
+                            isSiteReviewBookingLocked
+                        ? null
+                        : onBookSiteReview,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.event_available_rounded),
+                    label: Text(
+                      isSendingInvoice
+                          ? language.pick(
+                              en: 'Saving review...',
+                              de: 'Besichtigung wird gespeichert...',
+                            )
+                          : siteReviewActionLabel,
+                    ),
                   ),
-                ),
+                  if (canClockRequest)
+                    FilledButton.icon(
+                      onPressed: isClockingRequest ? null : onClockRequest,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.cobalt,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(
+                        isClockingRequest
+                            ? Icons.more_horiz_rounded
+                            : hasActiveClockLog
+                            ? Icons.logout_rounded
+                            : Icons.login_rounded,
+                      ),
+                      label: Text(
+                        isClockingRequest
+                            ? language.pick(en: 'Saving...', de: 'Speichert...')
+                            : isSiteReviewClockAction && hasActiveClockLog
+                            ? language.pick(
+                                en: 'Clock out review',
+                                de: 'Besichtigung ausstempeln',
+                              )
+                            : isSiteReviewClockAction
+                            ? language.pick(
+                                en: 'Clock in review',
+                                de: 'Zur Besichtigung einstempeln',
+                              )
+                            : hasActiveClockLog
+                            ? language.pick(
+                                en: 'Clock out work',
+                                de: 'Arbeit ausstempeln',
+                              )
+                            : language.pick(
+                                en: 'Clock in work',
+                                de: 'Arbeit einstempeln',
+                              ),
+                      ),
+                    ),
+                  FilledButton.tonalIcon(
+                    onPressed:
+                        isSendingInvoice ||
+                            isEstimationLocked ||
+                            !hasSiteReviewBooking
+                        ? null
+                        : onRunFinalEstimate,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.calculate_rounded),
+                    label: Text(
+                      isSendingInvoice
+                          ? language.pick(
+                              en: 'Saving estimate...',
+                              de: 'Schätzung wird gespeichert...',
+                            )
+                          : finalEstimateActionLabel,
+                    ),
+                  ),
+                ] else if (!isCustomerCareUser)
+                  FilledButton.tonalIcon(
+                    onPressed: isSendingInvoice || isEstimationLocked
+                        ? null
+                        : onEditEstimate,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.calculate_rounded),
+                    label: Text(estimationActionLabel),
+                  ),
                 if (onOpenPaymentProof != null)
                   OutlinedButton.icon(
                     onPressed: onOpenPaymentProof,
@@ -3115,7 +4810,9 @@ class _StaffChatActionTray extends StatelessWidget {
                       ),
                     ),
                     icon: const Icon(Icons.attach_file_rounded),
-                    label: const Text('View proof'),
+                    label: Text(
+                      language.pick(en: 'View proof', de: 'Nachweis ansehen'),
+                    ),
                   ),
                 if (onOpenReceipt != null)
                   OutlinedButton.icon(
@@ -3128,7 +4825,9 @@ class _StaffChatActionTray extends StatelessWidget {
                       ),
                     ),
                     icon: const Icon(Icons.receipt_long_rounded),
-                    label: const Text('View receipt'),
+                    label: Text(
+                      language.pick(en: 'View receipt', de: 'Beleg ansehen'),
+                    ),
                   ),
                 if (onApprovePaymentProof != null)
                   FilledButton.icon(
@@ -3141,7 +4840,12 @@ class _StaffChatActionTray extends StatelessWidget {
                     ),
                     icon: const Icon(Icons.verified_rounded),
                     label: Text(
-                      isReviewingPaymentProof ? 'Saving...' : 'Approve proof',
+                      isReviewingPaymentProof
+                          ? language.pick(en: 'Saving...', de: 'Speichert...')
+                          : language.pick(
+                              en: 'Approve proof',
+                              de: 'Nachweis bestätigen',
+                            ),
                     ),
                   ),
                 if (onRejectPaymentProof != null)
@@ -3157,7 +4861,12 @@ class _StaffChatActionTray extends StatelessWidget {
                       ),
                     ),
                     icon: const Icon(Icons.close_rounded),
-                    label: const Text('Reject proof'),
+                    label: Text(
+                      language.pick(
+                        en: 'Reject proof',
+                        de: 'Nachweis ablehnen',
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -3168,13 +4877,41 @@ class _StaffChatActionTray extends StatelessWidget {
   }
 }
 
-class _CompactStatusPill extends StatelessWidget {
+class _WorkflowMetaPill extends StatelessWidget {
+  const _WorkflowMetaPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: Colors.white.withValues(alpha: 0.86),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactStatusPill extends ConsumerWidget {
   const _CompactStatusPill({required this.status});
 
   final String status;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final colors = switch (status) {
       'submitted' => (background: AppTheme.clay, foreground: AppTheme.ink),
       'under_review' => (
@@ -3220,7 +4957,7 @@ class _CompactStatusPill extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         child: Text(
-          requestStatusLabelFor(status),
+          requestStatusLabelFor(status, language: language),
           style: Theme.of(context).textTheme.labelMedium?.copyWith(
             color: colors.foreground,
             fontWeight: FontWeight.w700,

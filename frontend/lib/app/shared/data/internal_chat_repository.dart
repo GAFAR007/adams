@@ -5,6 +5,7 @@ library;
 
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/internal_chat_model.dart';
@@ -39,6 +40,40 @@ class InternalChatRepository {
   const InternalChatRepository(this._client);
 
   final ApiClient _client;
+
+  String _normalizedUploadMimeType(String fileName, String mimeType) {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.isNotEmpty &&
+        normalizedMimeType != 'application/octet-stream') {
+      return normalizedMimeType;
+    }
+
+    final lowerCaseFileName = fileName.toLowerCase();
+    if (lowerCaseFileName.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lowerCaseFileName.endsWith('.jpg') ||
+        lowerCaseFileName.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lowerCaseFileName.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lowerCaseFileName.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (lowerCaseFileName.endsWith('.txt')) {
+      return 'text/plain';
+    }
+    if (lowerCaseFileName.endsWith('.doc')) {
+      return 'application/msword';
+    }
+    if (lowerCaseFileName.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+
+    return 'application/octet-stream';
+  }
 
   Future<InternalChatBundle> fetchBundle({required String viewerRole}) async {
     final response = await _client.getJson(_basePath(viewerRole));
@@ -96,6 +131,49 @@ class InternalChatRepository {
     return InternalChatThreadModel.fromJson(
       response['thread'] as Map<String, dynamic>? ?? const <String, dynamic>{},
     );
+  }
+
+  Future<InternalChatThreadModel> uploadAttachment({
+    required String viewerRole,
+    required String threadId,
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+    String? caption,
+  }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+    final response = await _client.postFormData(
+      '${_basePath(viewerRole)}/$threadId/messages/attachment',
+      createData: () => FormData.fromMap(<String, dynamic>{
+        'attachment': MultipartFile.fromBytes(
+          bytes,
+          filename: fileName,
+          contentType: DioMediaType.parse(resolvedMimeType),
+        ),
+        if (caption != null && caption.trim().isNotEmpty)
+          'caption': caption.trim(),
+      }),
+    );
+
+    return InternalChatThreadModel.fromJson(
+      response['thread'] as Map<String, dynamic>? ?? const <String, dynamic>{},
+    );
+  }
+
+  Future<String> refineReply({
+    required String viewerRole,
+    required String threadId,
+    required String draft,
+  }) async {
+    final response = await _client.postJson(
+      '${_basePath(viewerRole)}/$threadId/reply-assistant',
+      data: <String, dynamic>{'draft': draft},
+    );
+
+    return (response['assistant'] as Map<String, dynamic>? ??
+                const <String, dynamic>{})['suggestion']
+            as String? ??
+        '';
   }
 
   Future<InternalChatThreadModel> markRead({

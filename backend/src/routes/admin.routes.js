@@ -8,6 +8,7 @@ const express = require("express");
 
 const {
   adminAssignRequestController,
+  adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
   adminDeleteStaffInviteController,
@@ -17,6 +18,7 @@ const {
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminSelectRequestEstimationController,
   adminUploadRequestAttachmentController,
 } = require("../controllers/admin.controller");
 const {
@@ -25,6 +27,8 @@ const {
   listInternalChatsController,
   markInternalChatReadController,
   postInternalChatMessageController,
+  suggestInternalChatReplyController,
+  uploadInternalChatAttachmentController,
 } = require("../controllers/internal-chat.controller");
 const {
   USER_ROLES,
@@ -41,12 +45,14 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   adminAssignRequestValidator,
+  adminCalendarFiltersValidator,
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
   adminDeleteStaffInviteValidator,
   adminPostRequestMessageValidator,
   adminRequestFiltersValidator,
   adminReviewPaymentProofValidator,
+  adminSelectRequestEstimationValidator,
   adminUploadRequestAttachmentValidator,
 } = require("../validators/admin.validators");
 const {
@@ -54,6 +60,8 @@ const {
   createGroupInternalChatValidator,
   markInternalChatReadValidator,
   postInternalChatMessageValidator,
+  suggestInternalChatReplyValidator,
+  uploadInternalChatAttachmentValidator,
 } = require("../validators/internal-chat.validators");
 
 function createAdminRouter() {
@@ -69,6 +77,12 @@ function createAdminRouter() {
     adminDashboardController,
   );
   router.get(
+    "/calendar",
+    adminCalendarFiltersValidator,
+    validateRequest,
+    adminCalendarController,
+  );
+  router.get(
     "/requests",
     adminRequestFiltersValidator,
     validateRequest,
@@ -79,6 +93,12 @@ function createAdminRouter() {
     adminAssignRequestValidator,
     validateRequest,
     adminAssignRequestController,
+  );
+  router.patch(
+    "/requests/:requestId/estimations/select",
+    adminSelectRequestEstimationValidator,
+    validateRequest,
+    adminSelectRequestEstimationController,
   );
   router.post(
     "/requests/:requestId/messages",
@@ -146,6 +166,19 @@ function createAdminRouter() {
     postInternalChatMessageValidator,
     validateRequest,
     postInternalChatMessageController,
+  );
+  router.post(
+    "/internal-chats/:threadId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    uploadInternalChatAttachmentValidator,
+    validateRequest,
+    uploadInternalChatAttachmentController,
+  );
+  router.post(
+    "/internal-chats/:threadId/reply-assistant",
+    suggestInternalChatReplyValidator,
+    validateRequest,
+    suggestInternalChatReplyController,
   );
   router.post(
     "/internal-chats/:threadId/read",

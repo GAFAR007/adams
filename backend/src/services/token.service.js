@@ -272,6 +272,7 @@ function signStaffInviteToken(invite) {
     {
       inviteId: invite.inviteId,
       email: invite.email,
+      staffType: invite.staffType || null,
       tokenType: 'staff_invite',
     },
     env.jwtInviteSecret,

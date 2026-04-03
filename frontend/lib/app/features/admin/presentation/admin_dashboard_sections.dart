@@ -5,12 +5,54 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
 import '../../../shared/presentation/request_message_composer.dart';
 import '../../../shared/presentation/request_thread_section.dart';
+import '../../../shared/presentation/request_workflow_progress_bar.dart';
 import '../../../shared/presentation/status_chip.dart';
 import '../../../theme/app_theme.dart';
+
+String _pick(AppLanguage language, {required String en, required String de}) {
+  return language.pick(en: en, de: de);
+}
+
+String _requestInitials(String name) {
+  final trimmedName = name.trim();
+  if (trimmedName.isEmpty) {
+    return 'U';
+  }
+
+  final parts = trimmedName.split(RegExp(r'\s+'));
+  if (parts.length == 1) {
+    return parts.first[0].toUpperCase();
+  }
+
+  return (parts.first[0] + parts.last[0]).toUpperCase();
+}
+
+String _adminStatusLabel(ServiceRequestModel request, AppLanguage language) {
+  if (request.isQuoteReadyForInternalReview ||
+      request.isQuoteReadyForCustomerCare) {
+    return requestStatusLabelFor(request.status, language: language);
+  }
+
+  if (request.status == 'under_review' &&
+      (request.isSiteReviewReadyForInternalReview ||
+          request.isSiteReviewReadyForCustomerCare ||
+          request.quoteReview?.isSiteReview == true ||
+          (request.invoice?.isSiteReview == true &&
+              request.isSiteReviewPending))) {
+    return _pick(
+      language,
+      en: 'site review under review',
+      de: 'Besichtigung in Pruefung',
+    );
+  }
+
+  return requestStatusLabelFor(request.status, language: language);
+}
 
 class AdminRequestFilterChipData {
   const AdminRequestFilterChipData({
@@ -29,12 +71,14 @@ class AdminRequestFilterChipData {
 class AdminOverviewSection extends StatelessWidget {
   const AdminOverviewSection({
     super.key,
+    required this.language,
     required this.kpis,
     required this.recentRequests,
     required this.onOpenRequest,
     required this.onOpenQueue,
   });
 
+  final AppLanguage language;
   final AdminKpis kpis;
   final List<ServiceRequestModel> recentRequests;
   final ValueChanged<ServiceRequestModel> onOpenRequest;
@@ -55,32 +99,52 @@ class AdminOverviewSection extends StatelessWidget {
               runSpacing: 16,
               children: <Widget>[
                 _MetricCard(
-                  label: 'Total Requests',
+                  label: _pick(
+                    language,
+                    en: 'Total Requests',
+                    de: 'Anfragen gesamt',
+                  ),
                   value: '${kpis.totalRequests}',
                   width: metricWidth,
                 ),
                 _MetricCard(
-                  label: 'Waiting Queue',
+                  label: _pick(
+                    language,
+                    en: 'Waiting Queue',
+                    de: 'Warteschlange',
+                  ),
                   value: '${kpis.waitingQueueCount}',
                   width: metricWidth,
                 ),
                 _MetricCard(
-                  label: 'Active Queue',
+                  label: _pick(
+                    language,
+                    en: 'Active Queue',
+                    de: 'Aktive Queue',
+                  ),
                   value: '${kpis.activeQueueCount}',
                   width: metricWidth,
                 ),
                 _MetricCard(
-                  label: 'Staff Online',
+                  label: _pick(language, en: 'Staff Online', de: 'Team online'),
                   value: '${kpis.staffOnlineCount}',
                   width: metricWidth,
                 ),
                 _MetricCard(
-                  label: 'Pending Invites',
+                  label: _pick(
+                    language,
+                    en: 'Pending Invites',
+                    de: 'Offene Einladungen',
+                  ),
                   value: '${kpis.pendingInvitesCount}',
                   width: metricWidth,
                 ),
                 _MetricCard(
-                  label: 'Cleared Today',
+                  label: _pick(
+                    language,
+                    en: 'Cleared Today',
+                    de: 'Heute erledigt',
+                  ),
                   value: '${kpis.clearedTodayCount}',
                   width: metricWidth,
                 ),
@@ -88,6 +152,7 @@ class AdminOverviewSection extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             _RecentQueueActivityPanel(
+              language: language,
               requests: recentRequests,
               onOpenRequest: onOpenRequest,
               onOpenQueue: onOpenQueue,
@@ -102,6 +167,7 @@ class AdminOverviewSection extends StatelessWidget {
 class AdminQueueSidebar extends StatelessWidget {
   const AdminQueueSidebar({
     super.key,
+    required this.language,
     required this.searchController,
     required this.onApplySearch,
     required this.onClearSearch,
@@ -112,6 +178,7 @@ class AdminQueueSidebar extends StatelessWidget {
     this.edgeToEdge = false,
   });
 
+  final AppLanguage language;
   final TextEditingController searchController;
   final VoidCallback onApplySearch;
   final VoidCallback onClearSearch;
@@ -129,11 +196,11 @@ class AdminQueueSidebar extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0E10),
+        color: AppTheme.darkPage,
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[Color(0xFF121418), Color(0xFF0D0E10)],
+          colors: <Color>[AppTheme.darkPageRaised, AppTheme.darkPage],
         ),
         borderRadius: surfaceRadius,
         border: edgeToEdge
@@ -160,7 +227,7 @@ class AdminQueueSidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Admin queue',
+              _pick(language, en: 'Admin queue', de: 'Admin-Warteschlange'),
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -168,7 +235,11 @@ class AdminQueueSidebar extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Find the right customer thread fast, then open the full queue conversation on the right.',
+              _pick(
+                language,
+                en: 'Find the right customer thread fast, then open the full queue conversation on the right.',
+                de: 'Finden Sie schnell den passenden Kunden-Chat und öffnen Sie rechts den vollständigen Verlauf.',
+              ),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Colors.white.withValues(alpha: 0.62),
               ),
@@ -179,7 +250,11 @@ class AdminQueueSidebar extends StatelessWidget {
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => onApplySearch(),
               decoration: InputDecoration(
-                hintText: 'Search customer, email, or city',
+                hintText: _pick(
+                  language,
+                  en: 'Search customer, email, or city',
+                  de: 'Kunde, E-Mail oder Stadt suchen',
+                ),
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.06),
@@ -189,7 +264,11 @@ class AdminQueueSidebar extends StatelessWidget {
                 suffixIcon: searchController.text.trim().isEmpty
                     ? null
                     : IconButton(
-                        tooltip: 'Clear search',
+                        tooltip: _pick(
+                          language,
+                          en: 'Clear search',
+                          de: 'Suche leeren',
+                        ),
                         onPressed: onClearSearch,
                         icon: const Icon(Icons.close_rounded),
                       ),
@@ -294,7 +373,11 @@ class AdminQueueSidebar extends StatelessWidget {
                   ? Center(
                       child: _AdminEmptyState(
                         icon: Icons.inbox_outlined,
-                        label: 'No request threads match this filter.',
+                        label: _pick(
+                          language,
+                          en: 'No request threads match this filter.',
+                          de: 'Keine Anfrageverläufe passen zu diesem Filter.',
+                        ),
                         dark: true,
                       ),
                     )
@@ -347,7 +430,9 @@ class AdminQueueSidebar extends StatelessWidget {
                                     children: <Widget>[
                                       Expanded(
                                         child: Text(
-                                          request.serviceLabel,
+                                          request.serviceLabelForLanguage(
+                                            language,
+                                          ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: Theme.of(context)
@@ -360,7 +445,13 @@ class AdminQueueSidebar extends StatelessWidget {
                                         ),
                                       ),
                                       const SizedBox(width: 12),
-                                      StatusChip(status: request.status),
+                                      StatusChip(
+                                        status: request.status,
+                                        labelOverride: _adminStatusLabel(
+                                          request,
+                                          language,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                   const SizedBox(height: 6),
@@ -390,7 +481,11 @@ class AdminQueueSidebar extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    '${request.messageCount} messages',
+                                    _pick(
+                                      language,
+                                      en: '${request.messageCount} messages',
+                                      de: '${request.messageCount} Nachrichten',
+                                    ),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelMedium
@@ -427,6 +522,7 @@ class AdminQueueSidebar extends StatelessWidget {
 class AdminRequestDetailPane extends StatelessWidget {
   const AdminRequestDetailPane({
     super.key,
+    required this.language,
     required this.request,
     required this.staff,
     this.edgeToEdge = false,
@@ -452,6 +548,7 @@ class AdminRequestDetailPane extends StatelessWidget {
     this.onBack,
   });
 
+  final AppLanguage language;
   final ServiceRequestModel? request;
   final List<StaffMemberSummary> staff;
   final bool edgeToEdge;
@@ -480,6 +577,9 @@ class AdminRequestDetailPane extends StatelessWidget {
     BuildContext context,
     ServiceRequestModel request,
   ) async {
+    final assignableStaff = staff
+        .where((person) => person.staffType != 'customer_care')
+        .toList();
     String? localSelection = selectedAssignmentId ?? request.assignedStaff?.id;
 
     await showModalBottomSheet<void>(
@@ -490,16 +590,23 @@ class AdminRequestDetailPane extends StatelessWidget {
         return StatefulBuilder(
           builder: (BuildContext modalContext, StateSetter setModalState) {
             return _AdminSheetCard(
-              title: 'Assignment',
-              subtitle:
-                  'Assign this customer to staff without crowding the chat view.',
+              title: _pick(language, en: 'Assignment', de: 'Zuweisung'),
+              subtitle: _pick(
+                language,
+                en: 'Assign this customer to staff without crowding the chat view.',
+                de: 'Weisen Sie diesen Kunden dem Team zu, ohne die Chatansicht zu überladen.',
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  if (staff.isEmpty)
+                  if (assignableStaff.isEmpty)
                     Text(
-                      'No active staff accounts are available for assignment yet.',
+                      _pick(
+                        language,
+                        en: 'No technician or contractor accounts are available for assignment yet.',
+                        de: 'Derzeit sind keine Techniker- oder Auftragnehmerkonten für eine Zuweisung verfügbar.',
+                      ),
                       style: Theme.of(modalContext).textTheme.bodyMedium
                           ?.copyWith(
                             color: Colors.white.withValues(alpha: 0.72),
@@ -508,15 +615,19 @@ class AdminRequestDetailPane extends StatelessWidget {
                   else ...<Widget>[
                     DropdownButtonFormField<String>(
                       initialValue: localSelection,
-                      decoration: const InputDecoration(
-                        labelText: 'Assign to staff',
+                      decoration: InputDecoration(
+                        labelText: _pick(
+                          language,
+                          en: 'Assign to staff',
+                          de: 'Team zuweisen',
+                        ),
                       ),
-                      items: staff
+                      items: assignableStaff
                           .map(
                             (person) => DropdownMenuItem<String>(
                               value: person.id,
                               child: Text(
-                                '${person.fullName} · ${person.staffAvailability ?? 'offline'} · ${person.assignedOpenRequestCount} open',
+                                '${person.fullName} · ${person.staffTypeLabel} · ${person.staffAvailability ?? 'offline'} · ${person.assignedOpenRequestCount} open',
                               ),
                             ),
                           )
@@ -542,7 +653,17 @@ class AdminRequestDetailPane extends StatelessWidget {
                                 }
                               },
                         child: Text(
-                          isAssigning ? 'Assigning...' : 'Assign request',
+                          isAssigning
+                              ? _pick(
+                                  language,
+                                  en: 'Assigning...',
+                                  de: 'Wird zugewiesen...',
+                                )
+                              : _pick(
+                                  language,
+                                  en: 'Assign request',
+                                  de: 'Anfrage zuweisen',
+                                ),
                         ),
                       ),
                     ),
@@ -551,114 +672,6 @@ class AdminRequestDetailPane extends StatelessWidget {
               ),
             );
           },
-        );
-      },
-    );
-  }
-
-  Future<void> _showBillingSheet(
-    BuildContext context,
-    ServiceRequestModel request,
-  ) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (BuildContext modalContext) {
-        return _AdminSheetCard(
-          title: 'Billing',
-          subtitle:
-              'Create the quotation, review proof, and resolve payment actions here.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                request.invoice != null
-                    ? 'Quotation ${request.invoice!.invoiceNumber} is ${requestStatusLabelFor(request.invoice!.status)}.'
-                    : 'Create and send a quotation directly from this request detail pane.',
-                style: Theme.of(modalContext).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.72),
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: <Widget>[
-                  FilledButton.tonalIcon(
-                    onPressed: isSendingInvoice ? null : onSendInvoice,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.cobalt.withValues(alpha: 0.18),
-                      foregroundColor: Colors.white,
-                    ),
-                    icon: const Icon(Icons.receipt_long_rounded),
-                    label: Text(
-                      isSendingInvoice
-                          ? 'Sending quotation...'
-                          : 'Send quotation',
-                    ),
-                  ),
-                  if (onOpenPaymentProof != null)
-                    OutlinedButton.icon(
-                      onPressed: onOpenPaymentProof,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.white.withValues(alpha: 0.04),
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.attach_file_rounded),
-                      label: const Text('View proof'),
-                    ),
-                  if (onOpenReceipt != null)
-                    OutlinedButton.icon(
-                      onPressed: onOpenReceipt,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.white.withValues(alpha: 0.04),
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.receipt_long_rounded),
-                      label: const Text('View receipt'),
-                    ),
-                  if (onApprovePaymentProof != null)
-                    FilledButton.icon(
-                      onPressed: isReviewingPaymentProof
-                          ? null
-                          : onApprovePaymentProof,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.pine.withValues(alpha: 0.18),
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.verified_rounded),
-                      label: Text(
-                        isReviewingPaymentProof ? 'Saving...' : 'Approve proof',
-                      ),
-                    ),
-                  if (onRejectPaymentProof != null)
-                    OutlinedButton.icon(
-                      onPressed: isReviewingPaymentProof
-                          ? null
-                          : onRejectPaymentProof,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.white.withValues(alpha: 0.04),
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.close_rounded),
-                      label: const Text('Reject proof'),
-                    ),
-                ],
-              ),
-            ],
-          ),
         );
       },
     );
@@ -684,15 +697,19 @@ class AdminRequestDetailPane extends StatelessWidget {
         Future<void> openBilling() async {
           Navigator.of(modalContext).pop();
           await Future<void>.delayed(const Duration(milliseconds: 120));
-          if (context.mounted) {
-            await _showBillingSheet(context, request);
+          if (context.mounted && onSendInvoice != null) {
+            onSendInvoice!();
           }
         }
 
         return _AdminSheetCard(
-          title: '${request.contactFullName} profile',
-          subtitle:
-              'Keep the chat clear and open the full customer/request context only when needed.',
+          title:
+              '${request.contactFullName} ${_pick(language, en: 'profile', de: 'Profil')}',
+          subtitle: _pick(
+            language,
+            en: 'Keep the chat clear and open the full customer/request context only when needed.',
+            de: 'Halten Sie den Chat übersichtlich und öffnen Sie den vollständigen Kunden- und Anfragekontext nur bei Bedarf.',
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -713,7 +730,11 @@ class AdminRequestDetailPane extends StatelessWidget {
                   ),
                   _MetaChip(
                     icon: Icons.chat_bubble_outline_rounded,
-                    label: '${request.messageCount} messages',
+                    label: _pick(
+                      language,
+                      en: '${request.messageCount} messages',
+                      de: '${request.messageCount} Nachrichten',
+                    ),
                     dark: true,
                   ),
                 ],
@@ -728,15 +749,21 @@ class AdminRequestDetailPane extends StatelessWidget {
                     if (request.projectStartedAt != null)
                       _MetaChip(
                         icon: Icons.play_circle_outline_rounded,
-                        label:
-                            'Started ${_formatDateTime(request.projectStartedAt)}',
+                        label: _pick(
+                          language,
+                          en: 'Started ${_formatDateTime(request.projectStartedAt)}',
+                          de: 'Gestartet ${_formatDateTime(request.projectStartedAt)}',
+                        ),
                         dark: true,
                       ),
                     if (request.finishedAt != null)
                       _MetaChip(
                         icon: Icons.task_alt_rounded,
-                        label:
-                            'Finished ${_formatDateTime(request.finishedAt)}',
+                        label: _pick(
+                          language,
+                          en: 'Finished ${_formatDateTime(request.finishedAt)}',
+                          de: 'Abgeschlossen ${_formatDateTime(request.finishedAt)}',
+                        ),
                         dark: true,
                       ),
                   ],
@@ -769,13 +796,17 @@ class AdminRequestDetailPane extends StatelessWidget {
                 children: <Widget>[
                   _AdminDetailActionButton(
                     icon: Icons.assignment_ind_rounded,
-                    label: 'Assignment',
+                    label: _pick(language, en: 'Assignment', de: 'Zuweisung'),
                     onPressed: openAssignment,
                   ),
                   _AdminDetailActionButton(
                     icon: Icons.receipt_long_rounded,
-                    label: 'Billing',
-                    onPressed: openBilling,
+                    label: _pick(
+                      language,
+                      en: 'Internal review',
+                      de: 'Interne Prüfung',
+                    ),
+                    onPressed: onSendInvoice == null ? null : openBilling,
                   ),
                 ],
               ),
@@ -796,21 +827,25 @@ class AdminRequestDetailPane extends StatelessWidget {
     if (request == null) {
       return DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFF0D0E10),
+          color: AppTheme.darkPage,
           gradient: const LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: <Color>[Color(0xFF121418), Color(0xFF0D0E10)],
+            colors: <Color>[AppTheme.darkPageRaised, AppTheme.darkPage],
           ),
           borderRadius: surfaceRadius,
           border: edgeToEdge
               ? null
               : Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
-        child: const Center(
+        child: Center(
           child: _AdminEmptyState(
             icon: Icons.chat_bubble_outline_rounded,
-            label: 'Pick a customer thread to review the full queue context.',
+            label: _pick(
+              language,
+              en: 'Pick a customer thread to review the full queue context.',
+              de: 'Wählen Sie einen Kunden-Chat, um den vollständigen Anfragekontext zu prüfen.',
+            ),
             dark: true,
           ),
         ),
@@ -819,11 +854,11 @@ class AdminRequestDetailPane extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0E10),
+        color: AppTheme.darkPage,
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[Color(0xFF121418), Color(0xFF0D0E10)],
+          colors: <Color>[AppTheme.darkPageRaised, AppTheme.darkPage],
         ),
         borderRadius: surfaceRadius,
         border: edgeToEdge
@@ -866,63 +901,90 @@ class AdminRequestDetailPane extends StatelessWidget {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       icon: const Icon(Icons.arrow_back_rounded),
-                      label: const Text('Back to queue'),
+                      label: Text(
+                        _pick(language, en: 'Back to queue', de: 'Zur Queue'),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 4),
                 ],
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
+                    SizedBox.square(
+                      dimension: 28,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _showProfileSheet(context, request!),
+                        icon: CircleAvatar(
+                          radius: 14,
+                          backgroundColor: AppTheme.cobalt.withValues(
+                            alpha: 0.15,
+                          ),
+                          child: Text(
+                            _requestInitials(request!.contactFullName),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: AppTheme.cobalt,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
                           Text(
                             request!.contactFullName,
-                            style: Theme.of(context).textTheme.headlineMedium
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
-                            '${request!.serviceLabel} · ${request!.city}',
-                            style: Theme.of(context).textTheme.bodyMedium
+                            '${request!.serviceLabelForLanguage(language)} · ${request!.city}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: Colors.white.withValues(alpha: 0.62),
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _queueSummary(request!),
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.84),
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    StatusChip(status: request!.status),
+                    const SizedBox(width: 8),
+                    _AdminHeaderActionButton(
+                      icon: Icons.receipt_long_rounded,
+                      label: _pick(
+                        language,
+                        en: isCompact ? 'Review' : 'Internal review',
+                        de: isCompact ? 'Pruefen' : 'Interne Pruefung',
+                      ),
+                      onPressed: onSendInvoice,
+                    ),
+                    const SizedBox(width: 8),
+                    StatusChip(
+                      status: request!.status,
+                      compact: true,
+                      labelOverride: _adminStatusLabel(request!, language),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () => _showProfileSheet(context, request!),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: Colors.white.withValues(alpha: 0.04),
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.12),
-                    ),
-                  ),
-                  icon: const Icon(Icons.person_outline_rounded),
-                  label: const Text('Profile'),
-                ),
+                const SizedBox(height: 4),
+                RequestWorkflowProgressBar(request: request!, dark: true),
               ],
             ),
           ),
@@ -934,21 +996,30 @@ class AdminRequestDetailPane extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: <Color>[
-                    const Color(0xFF111214),
+                    AppTheme.darkSurface,
                     AppTheme.ember.withValues(alpha: 0.08),
-                    const Color(0xFF0D0E10),
+                    AppTheme.darkPage,
                   ],
                 ),
               ),
               child: SingleChildScrollView(
                 controller: threadScrollController,
-                padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
-                child: RequestThreadSection(
-                  key: ValueKey<String>(request!.id),
-                  messages: request!.messages,
-                  viewerRole: 'admin',
-                  dark: true,
-                  emptyLabel: 'No thread messages yet.',
+                padding: const EdgeInsets.fromLTRB(22, 10, 22, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    RequestThreadSection(
+                      key: ValueKey<String>(request!.id),
+                      messages: request!.messages,
+                      viewerRole: 'admin',
+                      dark: true,
+                      emptyLabel: _pick(
+                        language,
+                        en: 'No thread messages yet.',
+                        de: 'Noch keine Nachrichten im Verlauf.',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -965,7 +1036,11 @@ class AdminRequestDetailPane extends StatelessWidget {
               controller: messageController ?? TextEditingController(),
               leadingActions: <Widget>[
                 _AdminComposerActionButton(
-                  tooltip: 'Upload file',
+                  tooltip: _pick(
+                    language,
+                    en: 'Upload file',
+                    de: 'Datei hochladen',
+                  ),
                   icon: isUploadingAttachment
                       ? Icons.more_horiz_rounded
                       : Icons.attach_file_rounded,
@@ -975,9 +1050,21 @@ class AdminRequestDetailPane extends StatelessWidget {
                 ),
               ],
               hintText: composerEnabled
-                  ? 'Reply to the customer here'
-                  : 'Closed requests cannot accept new replies',
-              buttonLabel: 'Send reply',
+                  ? _pick(
+                      language,
+                      en: 'Reply to the customer here',
+                      de: 'Hier dem Kunden antworten',
+                    )
+                  : _pick(
+                      language,
+                      en: 'Closed requests cannot accept new replies',
+                      de: 'Geschlossene Anfragen nehmen keine neuen Antworten an',
+                    ),
+              buttonLabel: _pick(
+                language,
+                en: 'Send reply',
+                de: 'Antwort senden',
+              ),
               isSubmitting: isSendingMessage,
               isEnabled: composerEnabled,
               onSubmit: onSendMessage ?? () {},
@@ -987,18 +1074,6 @@ class AdminRequestDetailPane extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _queueSummary(ServiceRequestModel request) {
-    if (request.status == 'closed') {
-      return 'Closed request';
-    }
-
-    if (request.assignedStaff != null) {
-      return 'Assigned to ${request.assignedStaff!.fullName}';
-    }
-
-    return 'Waiting in live queue';
   }
 
   String _formatDateTime(DateTime? value) {
@@ -1047,14 +1122,131 @@ class _AdminComposerActionButton extends StatelessWidget {
   }
 }
 
-class AdminStaffSection extends StatelessWidget {
-  const AdminStaffSection({super.key, required this.staff});
+enum _AdminStaffRoleFilter { all, customerCare, technician, contractor }
 
+enum _AdminStaffAvailabilityFilter { all, online, offline }
+
+class AdminStaffSection extends StatefulWidget {
+  const AdminStaffSection({
+    super.key,
+    required this.language,
+    required this.staff,
+  });
+
+  final AppLanguage language;
   final List<StaffMemberSummary> staff;
 
   @override
+  State<AdminStaffSection> createState() => _AdminStaffSectionState();
+}
+
+class _AdminStaffSectionState extends State<AdminStaffSection> {
+  _AdminStaffRoleFilter _selectedRoleFilter = _AdminStaffRoleFilter.all;
+  _AdminStaffAvailabilityFilter _selectedAvailabilityFilter =
+      _AdminStaffAvailabilityFilter.all;
+
+  bool _matchesRoleFilter(StaffMemberSummary person) {
+    switch (_selectedRoleFilter) {
+      case _AdminStaffRoleFilter.customerCare:
+        return person.staffType == 'customer_care';
+      case _AdminStaffRoleFilter.technician:
+        return person.staffType == 'technician';
+      case _AdminStaffRoleFilter.contractor:
+        return person.staffType == 'contractor';
+      case _AdminStaffRoleFilter.all:
+        return true;
+    }
+  }
+
+  bool _matchesAvailabilityFilter(StaffMemberSummary person) {
+    final availability = person.staffAvailability ?? 'offline';
+
+    switch (_selectedAvailabilityFilter) {
+      case _AdminStaffAvailabilityFilter.online:
+        return availability == 'online';
+      case _AdminStaffAvailabilityFilter.offline:
+        return availability != 'online';
+      case _AdminStaffAvailabilityFilter.all:
+        return true;
+    }
+  }
+
+  String _roleFilterLabel(AppLanguage language, _AdminStaffRoleFilter filter) {
+    switch (filter) {
+      case _AdminStaffRoleFilter.customerCare:
+        return _pick(language, en: 'Customer care', de: 'Customer Care');
+      case _AdminStaffRoleFilter.technician:
+        return _pick(language, en: 'Technicians', de: 'Techniker');
+      case _AdminStaffRoleFilter.contractor:
+        return _pick(language, en: 'Contractors', de: 'Auftragnehmer');
+      case _AdminStaffRoleFilter.all:
+        return _pick(language, en: 'All staff', de: 'Gesamtes Team');
+    }
+  }
+
+  int _roleFilterCount(
+    List<StaffMemberSummary> staff,
+    _AdminStaffRoleFilter filter,
+  ) {
+    switch (filter) {
+      case _AdminStaffRoleFilter.customerCare:
+        return staff
+            .where((person) => person.staffType == 'customer_care')
+            .length;
+      case _AdminStaffRoleFilter.technician:
+        return staff.where((person) => person.staffType == 'technician').length;
+      case _AdminStaffRoleFilter.contractor:
+        return staff.where((person) => person.staffType == 'contractor').length;
+      case _AdminStaffRoleFilter.all:
+        return staff.length;
+    }
+  }
+
+  String _availabilityFilterLabel(
+    AppLanguage language,
+    _AdminStaffAvailabilityFilter filter,
+  ) {
+    switch (filter) {
+      case _AdminStaffAvailabilityFilter.online:
+        return _pick(language, en: 'Online', de: 'Online');
+      case _AdminStaffAvailabilityFilter.offline:
+        return _pick(language, en: 'Offline', de: 'Offline');
+      case _AdminStaffAvailabilityFilter.all:
+        return _pick(language, en: 'All statuses', de: 'Alle Status');
+    }
+  }
+
+  int _availabilityFilterCount(
+    List<StaffMemberSummary> staff,
+    _AdminStaffAvailabilityFilter filter,
+  ) {
+    switch (filter) {
+      case _AdminStaffAvailabilityFilter.online:
+        return staff
+            .where(
+              (person) => (person.staffAvailability ?? 'offline') == 'online',
+            )
+            .length;
+      case _AdminStaffAvailabilityFilter.offline:
+        return staff
+            .where(
+              (person) => (person.staffAvailability ?? 'offline') != 'online',
+            )
+            .length;
+      case _AdminStaffAvailabilityFilter.all:
+        return staff.length;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final sortedStaff = <StaffMemberSummary>[...staff]
+    final language = widget.language;
+    final staff = widget.staff;
+    final filteredStaff = staff
+        .where(_matchesRoleFilter)
+        .where(_matchesAvailabilityFilter)
+        .toList();
+    final sortedStaff = <StaffMemberSummary>[...filteredStaff]
       ..sort((a, b) {
         final aOnline = (a.staffAvailability ?? 'offline') == 'online' ? 0 : 1;
         final bOnline = (b.staffAvailability ?? 'offline') == 'online' ? 0 : 1;
@@ -1076,22 +1268,32 @@ class AdminStaffSection extends StatelessWidget {
     }).length;
 
     if (staff.isEmpty) {
-      return const _AdminOverviewPanel(
-        title: 'Team',
-        subtitle:
-            'No active staff accounts exist yet. Create an invite to onboard someone.',
+      return _AdminOverviewPanel(
+        title: _pick(language, en: 'Team', de: 'Team'),
+        subtitle: _pick(
+          language,
+          en: 'No active staff accounts exist yet. Create an invite to onboard someone.',
+          de: 'Es gibt noch keine aktiven Teamkonten. Erstellen Sie eine Einladung, um jemanden aufzunehmen.',
+        ),
         child: _AdminEmptyState(
           icon: Icons.group_outlined,
-          label: 'No staff accounts added yet.',
+          label: _pick(
+            language,
+            en: 'No staff accounts added yet.',
+            de: 'Es wurden noch keine Teamkonten hinzugefügt.',
+          ),
           dark: true,
         ),
       );
     }
 
     return _AdminOverviewPanel(
-      title: 'Team',
-      subtitle:
-          'Track staff availability, open queue load, and how much work each person cleared today.',
+      title: _pick(language, en: 'Team', de: 'Team'),
+      subtitle: _pick(
+        language,
+        en: 'Track staff availability, open queue load, and how much work each person cleared today.',
+        de: 'Behalten Sie Teamverfügbarkeit, offene Queue-Last und heutige Abschlüsse im Blick.',
+      ),
       child: Column(
         children: <Widget>[
           Wrap(
@@ -1100,89 +1302,182 @@ class AdminStaffSection extends StatelessWidget {
             children: <Widget>[
               _AdminSummaryChip(
                 icon: Icons.group_rounded,
-                label: '${sortedStaff.length} staff',
+                label: _pick(
+                  language,
+                  en: '${sortedStaff.length} shown',
+                  de: '${sortedStaff.length} sichtbar',
+                ),
               ),
               _AdminSummaryChip(
                 icon: Icons.circle,
-                label: '$onlineCount online',
+                label: _pick(
+                  language,
+                  en: '$onlineCount online',
+                  de: '$onlineCount online',
+                ),
                 accentColor: AppTheme.pine,
               ),
             ],
           ),
           const SizedBox(height: 16),
-          ...sortedStaff.map((person) {
-            final availability = person.staffAvailability ?? 'offline';
-            final isOnline = availability == 'online';
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: Colors.white.withValues(alpha: 0.08),
-                        child: Text(
-                          person.fullName.trim().isEmpty
-                              ? '?'
-                              : person.fullName.trim()[0].toUpperCase(),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              person.fullName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${person.assignedOpenRequestCount} open · ${person.clearedTodayCount} cleared today',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Colors.white.withValues(alpha: 0.62),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      _AdminPresenceChip(
-                        label: isOnline ? 'online' : 'offline',
-                        online: isOnline,
-                      ),
-                    ],
-                  ),
-                ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _pick(language, en: 'Filter by role', de: 'Nach Rolle filtern'),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Colors.white.withValues(alpha: 0.78),
+                fontWeight: FontWeight.w700,
               ),
-            );
-          }),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _AdminStaffRoleFilter.values.map((filter) {
+              final isSelected = filter == _selectedRoleFilter;
+              return _AdminFilterChip(
+                label:
+                    '${_roleFilterLabel(language, filter)} (${_roleFilterCount(staff, filter)})',
+                selected: isSelected,
+                accentColor: AppTheme.cobalt,
+                onTap: () => setState(() => _selectedRoleFilter = filter),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _pick(
+                language,
+                en: 'Filter by availability',
+                de: 'Nach Verfügbarkeit filtern',
+              ),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Colors.white.withValues(alpha: 0.78),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _AdminStaffAvailabilityFilter.values.map((filter) {
+              final isSelected = filter == _selectedAvailabilityFilter;
+              return _AdminFilterChip(
+                label:
+                    '${_availabilityFilterLabel(language, filter)} (${_availabilityFilterCount(staff, filter)})',
+                selected: isSelected,
+                accentColor: AppTheme.pine,
+                onTap: () =>
+                    setState(() => _selectedAvailabilityFilter = filter),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          if (sortedStaff.isEmpty)
+            _AdminEmptyState(
+              icon: Icons.filter_alt_off_rounded,
+              label: _pick(
+                language,
+                en: 'No staff match this filter set yet.',
+                de: 'Für diese Filter gibt es noch keine Teammitglieder.',
+              ),
+              dark: true,
+            )
+          else
+            ...sortedStaff.map((person) {
+              final availability = person.staffAvailability ?? 'offline';
+              final isOnline = availability == 'online';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: Colors.white.withValues(alpha: 0.08),
+                          child: Text(
+                            person.fullName.trim().isEmpty
+                                ? '?'
+                                : person.fullName.trim()[0].toUpperCase(),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                person.fullName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                person.staffTypeLabel,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: AppTheme.mist,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _pick(
+                                  language,
+                                  en: '${person.assignedOpenRequestCount} open · ${person.clearedTodayCount} cleared today',
+                                  de: '${person.assignedOpenRequestCount} offen · ${person.clearedTodayCount} heute erledigt',
+                                ),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.62,
+                                      ),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        _AdminPresenceChip(
+                          label: isOnline
+                              ? _pick(language, en: 'online', de: 'online')
+                              : _pick(language, en: 'offline', de: 'offline'),
+                          online: isOnline,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
         ],
       ),
     );
@@ -1192,11 +1487,14 @@ class AdminStaffSection extends StatelessWidget {
 class AdminInvitesSection extends StatelessWidget {
   const AdminInvitesSection({
     super.key,
+    required this.language,
     required this.firstNameController,
     required this.lastNameController,
     required this.emailController,
     required this.phoneController,
+    required this.inviteStaffType,
     required this.isInviteSubmitting,
+    required this.onInviteStaffTypeChanged,
     required this.onSubmitInvite,
     required this.invites,
     required this.inviteIdsBeingDeleted,
@@ -1204,11 +1502,14 @@ class AdminInvitesSection extends StatelessWidget {
     required this.onDeleteInvite,
   });
 
+  final AppLanguage language;
   final TextEditingController firstNameController;
   final TextEditingController lastNameController;
   final TextEditingController emailController;
   final TextEditingController phoneController;
+  final String inviteStaffType;
   final bool isInviteSubmitting;
+  final ValueChanged<String?> onInviteStaffTypeChanged;
   final VoidCallback onSubmitInvite;
   final List<StaffInviteModel> invites;
   final Set<String> inviteIdsBeingDeleted;
@@ -1225,32 +1526,72 @@ class AdminInvitesSection extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 124),
       children: <Widget>[
         _AdminOverviewPanel(
-          title: 'Create staff invite',
-          subtitle: 'Generate a copyable link and share it outside the app.',
+          title: _pick(
+            language,
+            en: 'Create staff invite',
+            de: 'Teameinladung erstellen',
+          ),
+          subtitle: _pick(
+            language,
+            en: 'Generate a copyable link and share it outside the app.',
+            de: 'Erstellen Sie einen kopierbaren Link und teilen Sie ihn außerhalb der App.',
+          ),
           child: Column(
             children: <Widget>[
               TextField(
                 controller: firstNameController,
                 style: textStyle,
-                decoration: _adminDarkInputDecoration('First name'),
+                decoration: _adminDarkInputDecoration(
+                  _pick(language, en: 'First name', de: 'Vorname'),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: lastNameController,
                 style: textStyle,
-                decoration: _adminDarkInputDecoration('Last name'),
+                decoration: _adminDarkInputDecoration(
+                  _pick(language, en: 'Last name', de: 'Nachname'),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: emailController,
                 style: textStyle,
-                decoration: _adminDarkInputDecoration('Email'),
+                decoration: _adminDarkInputDecoration(
+                  _pick(language, en: 'Email', de: 'E-Mail'),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: phoneController,
                 style: textStyle,
-                decoration: _adminDarkInputDecoration('Phone'),
+                decoration: _adminDarkInputDecoration(
+                  _pick(language, en: 'Phone', de: 'Telefon'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: inviteStaffType,
+                dropdownColor: AppTheme.darkPageRaised,
+                style: textStyle,
+                decoration: _adminDarkInputDecoration(
+                  _pick(language, en: 'Staff type', de: 'Mitarbeitertyp'),
+                ),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem<String>(
+                    value: 'customer_care',
+                    child: Text('Customer Care'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'technician',
+                    child: Text('Technician'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'contractor',
+                    child: Text('Contractor'),
+                  ),
+                ],
+                onChanged: isInviteSubmitting ? null : onInviteStaffTypeChanged,
               ),
               const SizedBox(height: 16),
               SizedBox(
@@ -1263,7 +1604,17 @@ class AdminInvitesSection extends StatelessWidget {
                   ),
                   onPressed: isInviteSubmitting ? null : onSubmitInvite,
                   child: Text(
-                    isInviteSubmitting ? 'Creating...' : 'Create invite',
+                    isInviteSubmitting
+                        ? _pick(
+                            language,
+                            en: 'Creating...',
+                            de: 'Wird erstellt...',
+                          )
+                        : _pick(
+                            language,
+                            en: 'Create invite',
+                            de: 'Einladung erstellen',
+                          ),
                   ),
                 ),
               ),
@@ -1272,15 +1623,26 @@ class AdminInvitesSection extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         _AdminOverviewPanel(
-          title: 'Pending invite links',
-          subtitle:
-              'Copy these links manually, or remove them if the onboarding path changes.',
+          title: _pick(
+            language,
+            en: 'Pending invite links',
+            de: 'Offene Einladungslinks',
+          ),
+          subtitle: _pick(
+            language,
+            en: 'Copy these links manually, or remove them if the onboarding path changes.',
+            de: 'Kopieren Sie diese Links manuell oder entfernen Sie sie, wenn sich der Onboarding-Weg ändert.',
+          ),
           child: Column(
             children: invites.isEmpty
                 ? <Widget>[
-                    const _AdminEmptyState(
+                    _AdminEmptyState(
                       icon: Icons.link_off_rounded,
-                      label: 'No pending staff invites yet.',
+                      label: _pick(
+                        language,
+                        en: 'No pending staff invites yet.',
+                        de: 'Noch keine offenen Teameinladungen.',
+                      ),
                       dark: true,
                     ),
                   ]
@@ -1328,6 +1690,15 @@ class AdminInvitesSection extends StatelessWidget {
                                       ),
                                 ),
                               ],
+                              const SizedBox(height: 4),
+                              Text(
+                                invite.staffTypeLabel,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: AppTheme.mist,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
                               const SizedBox(height: 10),
                               DecoratedBox(
                                 decoration: BoxDecoration(
@@ -1367,7 +1738,13 @@ class AdminInvitesSection extends StatelessWidget {
                                       foregroundColor: Colors.white,
                                     ),
                                     icon: const Icon(Icons.copy_rounded),
-                                    label: const Text('Copy link'),
+                                    label: Text(
+                                      _pick(
+                                        language,
+                                        en: 'Copy link',
+                                        de: 'Link kopieren',
+                                      ),
+                                    ),
                                   ),
                                   OutlinedButton.icon(
                                     onPressed: isDeleting
@@ -1396,7 +1773,17 @@ class AdminInvitesSection extends StatelessWidget {
                                             Icons.delete_outline_rounded,
                                           ),
                                     label: Text(
-                                      isDeleting ? 'Removing...' : 'Remove',
+                                      isDeleting
+                                          ? _pick(
+                                              language,
+                                              en: 'Removing...',
+                                              de: 'Wird entfernt...',
+                                            )
+                                          : _pick(
+                                              language,
+                                              en: 'Remove',
+                                              de: 'Entfernen',
+                                            ),
                                     ),
                                   ),
                                 ],
@@ -1438,11 +1825,13 @@ InputDecoration _adminDarkInputDecoration(String labelText) {
 
 class _RecentQueueActivityPanel extends StatelessWidget {
   const _RecentQueueActivityPanel({
+    required this.language,
     required this.requests,
     required this.onOpenRequest,
     required this.onOpenQueue,
   });
 
+  final AppLanguage language;
   final List<ServiceRequestModel> requests;
   final ValueChanged<ServiceRequestModel> onOpenRequest;
   final VoidCallback onOpenQueue;
@@ -1457,17 +1846,28 @@ class _RecentQueueActivityPanel extends StatelessWidget {
         : 0;
 
     return _AdminOverviewPanel(
-      title: 'Recent queue activity',
-      subtitle:
-          'Latest customer updates and request changes. Open the queue for the full live list.',
-      actionLabel: 'Open queue',
+      title: _pick(
+        language,
+        en: 'Recent queue activity',
+        de: 'Aktuelle Queue-Aktivität',
+      ),
+      subtitle: _pick(
+        language,
+        en: 'Latest customer updates and request changes. Open the queue for the full live list.',
+        de: 'Neueste Kundenupdates und Anfrageänderungen. Öffnen Sie die Queue für die vollständige Live-Liste.',
+      ),
+      actionLabel: _pick(language, en: 'Open queue', de: 'Queue öffnen'),
       onAction: onOpenQueue,
       child: Column(
         children: previewRequests.isEmpty
             ? <Widget>[
-                const _AdminEmptyState(
+                _AdminEmptyState(
                   icon: Icons.inbox_outlined,
-                  label: 'No recent queue activity yet.',
+                  label: _pick(
+                    language,
+                    en: 'No recent queue activity yet.',
+                    de: 'Noch keine aktuelle Queue-Aktivität.',
+                  ),
                   dark: true,
                 ),
               ]
@@ -1499,7 +1899,7 @@ class _RecentQueueActivityPanel extends StatelessWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: <Widget>[
                                     Text(
-                                      request.serviceLabel,
+                                      request.serviceLabelForLanguage(language),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: Theme.of(context)
@@ -1545,10 +1945,16 @@ class _RecentQueueActivityPanel extends StatelessWidget {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: <Widget>[
-                                  StatusChip(status: request.status),
+                                  StatusChip(
+                                    status: request.status,
+                                    labelOverride: _adminStatusLabel(
+                                      request,
+                                      language,
+                                    ),
+                                  ),
                                   const SizedBox(height: 10),
                                   Text(
-                                    'Open',
+                                    _pick(language, en: 'Open', de: 'Öffnen'),
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelMedium
@@ -1570,7 +1976,11 @@ class _RecentQueueActivityPanel extends StatelessWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '$hiddenCount more updates in the full queue view.',
+                      _pick(
+                        language,
+                        en: '$hiddenCount more updates in the full queue view.',
+                        de: '$hiddenCount weitere Updates in der vollständigen Queue-Ansicht.',
+                      ),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Colors.white.withValues(alpha: 0.54),
                         fontWeight: FontWeight.w600,
@@ -1609,9 +2019,9 @@ class _MetricCard extends StatelessWidget {
       width: width,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFF111316),
+          color: AppTheme.darkSurface,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          border: Border.all(color: AppTheme.darkBorder),
         ),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -1660,9 +2070,9 @@ class _AdminOverviewPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF111316),
+        color: AppTheme.darkSurface,
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: AppTheme.darkBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1748,6 +2158,74 @@ class _AdminSummaryChip extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
                 color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminFilterChip extends StatelessWidget {
+  const _AdminFilterChip({
+    required this.label,
+    required this.selected,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = selected
+        ? AppTheme.blendOn(accentColor.withValues(alpha: 0.28))
+        : AppTheme.blendOn(Colors.white.withValues(alpha: 0.06));
+    final borderColor = selected
+        ? accentColor.withValues(alpha: 0.82)
+        : Colors.white.withValues(alpha: 0.14);
+    final foregroundColor = AppTheme.readableForegroundFor(
+      backgroundColor,
+      light: Colors.white,
+      dark: AppTheme.ink,
+    );
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor),
+          boxShadow: selected
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: accentColor.withValues(alpha: 0.14),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (selected) ...<Widget>[
+              Icon(Icons.check_rounded, size: 18, color: foregroundColor),
+              const SizedBox(width: 8),
+            ],
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: foregroundColor,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1857,7 +2335,7 @@ class _AdminDetailActionButton extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1868,6 +2346,35 @@ class _AdminDetailActionButton extends StatelessWidget {
         foregroundColor: Colors.white,
       ),
       icon: Icon(icon, size: 18),
+      label: Text(label),
+    );
+  }
+}
+
+class _AdminHeaderActionButton extends StatelessWidget {
+  const _AdminHeaderActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.tonalIcon(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+      icon: Icon(icon, size: 16),
       label: Text(label),
     );
   }
@@ -1891,9 +2398,9 @@ class _AdminSheetCard extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: const Color(0xFF111316),
+            color: AppTheme.darkSurface,
             borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            border: Border.all(color: AppTheme.darkBorder),
           ),
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

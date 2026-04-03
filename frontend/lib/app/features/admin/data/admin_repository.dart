@@ -10,6 +10,17 @@ import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
 import '../../../core/network/api_client.dart';
 
+Map<String, dynamic> _compactJson(Map<String, dynamic> values) {
+  return Map<String, dynamic>.fromEntries(
+    values.entries
+        .where((entry) => entry.value != null)
+        .map(
+          (entry) =>
+              MapEntry<String, dynamic>(entry.key, entry.value as dynamic),
+        ),
+  );
+}
+
 final adminRepositoryProvider = Provider<AdminRepository>((ref) {
   return AdminRepository(ref.read(apiClientProvider));
 });
@@ -103,6 +114,21 @@ class AdminRepository {
         .toList();
   }
 
+  Future<List<ServiceRequestModel>> fetchCalendarRequests({
+    required String start,
+    required String end,
+  }) async {
+    final response = await _client.getJson(
+      '/admin/calendar',
+      queryParameters: <String, dynamic>{'start': start, 'end': end},
+    );
+
+    return (response['requests'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map(ServiceRequestModel.fromJson)
+        .toList();
+  }
+
   Future<void> assignRequest({
     required String requestId,
     required String staffId,
@@ -121,6 +147,16 @@ class AdminRepository {
     await _client.postJson(
       '/admin/requests/$requestId/messages',
       data: <String, dynamic>{'message': message, 'actionType': actionType},
+    );
+  }
+
+  Future<void> selectEstimation({
+    required String requestId,
+    required String estimationId,
+  }) async {
+    await _client.patchJson(
+      '/admin/requests/$requestId/estimations/select',
+      data: <String, dynamic>{'estimationId': estimationId},
     );
   }
 
@@ -149,8 +185,19 @@ class AdminRepository {
 
   Future<void> sendInvoice({
     required String requestId,
-    required double amount,
+    required double adminServiceChargePercent,
     required String dueDate,
+    String? reviewKind,
+    String? siteReviewDate,
+    String? siteReviewStartTime,
+    String? siteReviewEndTime,
+    String? siteReviewNotes,
+    String? plannedStartDate,
+    String? plannedStartTime,
+    String? plannedEndTime,
+    double? plannedHoursPerDay,
+    String? plannedExpectedEndDate,
+    List<Map<String, dynamic>>? plannedDailySchedule,
     required String paymentMethod,
     required String paymentInstructions,
     String? note,
@@ -158,8 +205,21 @@ class AdminRepository {
     await _client.postJson(
       '/admin/requests/$requestId/invoice',
       data: <String, dynamic>{
-        'amount': amount,
+        'adminServiceChargePercent': adminServiceChargePercent,
         'dueDate': dueDate,
+        ..._compactJson(<String, dynamic>{
+          'reviewKind': reviewKind,
+          'siteReviewDate': siteReviewDate,
+          'siteReviewStartTime': siteReviewStartTime,
+          'siteReviewEndTime': siteReviewEndTime,
+          'siteReviewNotes': siteReviewNotes,
+          'plannedStartDate': plannedStartDate,
+          'plannedStartTime': plannedStartTime,
+          'plannedEndTime': plannedEndTime,
+          'plannedHoursPerDay': plannedHoursPerDay,
+          'plannedExpectedEndDate': plannedExpectedEndDate,
+          'plannedDailySchedule': plannedDailySchedule,
+        }),
         'paymentMethod': paymentMethod,
         'paymentInstructions': paymentInstructions,
         'note': note,
@@ -183,6 +243,7 @@ class AdminRepository {
     required String lastName,
     required String email,
     required String phone,
+    required String staffType,
   }) async {
     await _client.postJson(
       '/admin/staff/invites',
@@ -191,6 +252,7 @@ class AdminRepository {
         'lastName': lastName,
         'email': email,
         'phone': phone,
+        'staffType': staffType,
       },
     );
   }

@@ -53,10 +53,10 @@ class WorkspaceBottomNav extends StatelessWidget {
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             final isCompact = compact || constraints.maxWidth < 460;
-            final surfaceColor = dark ? const Color(0xFF101214) : Colors.white;
+            final surfaceColor = dark ? AppTheme.darkSurface : AppTheme.shell;
             final borderColor = dark
-                ? Colors.white.withValues(alpha: 0.08)
-                : AppTheme.clay.withValues(alpha: 0.7);
+                ? AppTheme.darkBorder
+                : AppTheme.border.withValues(alpha: 0.78);
 
             final navDecoration = BoxDecoration(
               color: surfaceColor,
@@ -92,10 +92,10 @@ class WorkspaceBottomNav extends StatelessWidget {
                     final badgeBackgroundColor = item.badgeBackgroundColor;
                     final badgeForegroundColor = item.badgeForegroundColor;
                     final foregroundColor = isSelected
-                        ? Colors.white
+                        ? (dark ? AppTheme.darkAccent : Colors.white)
                         : dark
-                        ? Colors.white.withValues(alpha: 0.68)
-                        : AppTheme.ink.withValues(alpha: 0.74);
+                        ? AppTheme.darkTextMuted
+                        : AppTheme.textMuted;
 
                     return Expanded(
                       child: InkWell(
@@ -111,8 +111,13 @@ class WorkspaceBottomNav extends StatelessWidget {
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? AppTheme.cobalt
+                                ? (dark
+                                      ? AppTheme.darkAccentSurface
+                                      : AppTheme.cobalt)
                                 : Colors.transparent,
+                            border: isSelected && dark
+                                ? Border.all(color: AppTheme.darkBorderStrong)
+                                : null,
                             borderRadius: BorderRadius.circular(
                               isCompact ? 18 : 20,
                             ),
@@ -137,14 +142,18 @@ class WorkspaceBottomNav extends StatelessWidget {
                                           color:
                                               badgeBackgroundColor ??
                                               (isSelected
-                                                  ? Colors.white.withValues(
-                                                      alpha: 0.2,
-                                                    )
+                                                  ? (dark
+                                                        ? AppTheme.darkAccent
+                                                              .withValues(
+                                                                alpha: 0.18,
+                                                              )
+                                                        : Colors.white
+                                                              .withValues(
+                                                                alpha: 0.2,
+                                                              ))
                                                   : dark
-                                                  ? Colors.white.withValues(
-                                                      alpha: 0.1,
-                                                    )
-                                                  : AppTheme.sand),
+                                                  ? AppTheme.darkSurfaceMuted
+                                                  : AppTheme.shellMuted),
                                           borderRadius: BorderRadius.circular(
                                             999,
                                           ),
@@ -163,9 +172,12 @@ class WorkspaceBottomNav extends StatelessWidget {
                                                   color:
                                                       badgeForegroundColor ??
                                                       (isSelected
-                                                          ? Colors.white
+                                                          ? (dark
+                                                                ? AppTheme
+                                                                      .darkAccent
+                                                                : Colors.white)
                                                           : dark
-                                                          ? Colors.white
+                                                          ? AppTheme.darkText
                                                           : AppTheme.ink),
                                                   fontWeight: FontWeight.w700,
                                                 ),

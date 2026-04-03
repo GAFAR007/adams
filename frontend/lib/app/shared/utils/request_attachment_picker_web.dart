@@ -9,7 +9,7 @@ import 'dart:typed_data';
 import 'request_attachment_picker_types.dart';
 
 const _allAttachmentAcceptValue =
-    '.png,.jpg,.jpeg,.webp,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    '.png,.jpg,.jpeg,.webp,.mp4,.mov,.webm,.pdf,.txt,.doc,.docx,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const _imageOnlyAcceptValue =
     '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
 

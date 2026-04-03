@@ -4,63 +4,42 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/i18n/app_language.dart';
 import '../../core/models/service_request_model.dart';
 import '../../theme/app_theme.dart';
 
-class StatusChip extends StatelessWidget {
-  const StatusChip({super.key, required this.status, this.compact = false});
+class StatusChip extends ConsumerWidget {
+  const StatusChip({
+    super.key,
+    required this.status,
+    this.compact = false,
+    this.labelOverride,
+  });
 
   final String status;
   final bool compact;
+  final String? labelOverride;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = switch (status) {
-      'submitted' => (background: AppTheme.clay, foreground: AppTheme.ink),
-      'under_review' => (
-        background: const Color(0xFFFFF0C9),
-        foreground: AppTheme.ink,
-      ),
-      'assigned' => (
-        background: const Color(0xFFD7E7FF),
-        foreground: AppTheme.cobalt,
-      ),
-      'quoted' => (
-        background: const Color(0xFFFFE2C8),
-        foreground: AppTheme.ember,
-      ),
-      'appointment_confirmed' => (
-        background: const Color(0xFFD8F2E8),
-        foreground: AppTheme.pine,
-      ),
-      'pending_start' => (
-        background: const Color(0xFFE9E1FF),
-        foreground: const Color(0xFF5E41A8),
-      ),
-      'project_started' => (
-        background: const Color(0xFFD9F4FF),
-        foreground: const Color(0xFF15607A),
-      ),
-      'work_done' => (
-        background: const Color(0xFFDDF7E4),
-        foreground: const Color(0xFF2F7C3E),
-      ),
-      'closed' => (
-        background: const Color(0xFFE7E7E7),
-        foreground: AppTheme.ink,
-      ),
-      _ => (background: AppTheme.clay, foreground: AppTheme.ink),
-    };
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
+    final tone = AppTheme.statusTone(status);
 
     return Chip(
-      label: Text(requestStatusLabelFor(status)),
-      backgroundColor: colors.background,
+      label: Text(
+        labelOverride ?? requestStatusLabelFor(status, language: language),
+      ),
+      backgroundColor: tone.background,
+      side: BorderSide(
+        color: (tone.border ?? tone.background).withValues(alpha: 0.96),
+      ),
       labelStyle:
           (compact
                   ? Theme.of(context).textTheme.labelSmall
                   : Theme.of(context).textTheme.bodySmall)
-              ?.copyWith(color: colors.foreground, fontWeight: FontWeight.w700),
+              ?.copyWith(color: tone.foreground, fontWeight: FontWeight.w700),
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 4 : 8,
         vertical: compact ? 0 : 2,

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/models/public_company_profile.dart';
 import '../../../theme/app_theme.dart';
 import '../../public/data/public_repository.dart';
@@ -183,7 +184,17 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   @override
   void initState() {
     super.initState();
-    _language = publicSiteLanguageFromCode(widget.initialLanguageCode);
+    final initialCode = widget.initialLanguageCode;
+    _language = initialCode == null || initialCode.trim().isEmpty
+        ? ref.read(appLanguageProvider)
+        : publicSiteLanguageFromCode(initialCode);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      ref.read(appLanguageProvider.notifier).setLanguage(_language);
+    });
   }
 
   @override
@@ -214,6 +225,28 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     _emailController.text = account.email;
     _passwordController.text = account.quickFillPassword ?? '';
     setState(() {});
+  }
+
+  String _quickFillRoleLabel(DemoLoginAccount account) {
+    switch (account.staffType) {
+      case 'customer_care':
+        return _isGerman ? 'Customer Care' : 'Customer Care';
+      case 'technician':
+        return _isGerman ? 'Techniker' : 'Technician';
+      case 'contractor':
+        return _isGerman ? 'Auftragnehmer' : 'Contractor';
+    }
+
+    switch (account.role) {
+      case 'admin':
+        return _isGerman ? 'Admin' : 'Admin';
+      case 'customer':
+        return _isGerman ? 'Kunde' : 'Customer';
+      case 'staff':
+        return _isGerman ? 'Mitarbeiter' : 'Staff';
+      default:
+        return _isGerman ? 'Benutzer' : 'User';
+    }
   }
 
   Future<void> _submit() async {
@@ -302,6 +335,14 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                         ),
                       ),
                   ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _quickFillRoleLabel(account),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: AppTheme.cobalt,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -682,6 +723,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
       language: _language,
       onLanguageChanged: (language) {
         setState(() => _language = language);
+        ref.read(appLanguageProvider.notifier).setLanguage(language);
       },
       activeItem: PublicNavItem.none,
       eyebrow: widget.copy.eyebrowFor(_language),
