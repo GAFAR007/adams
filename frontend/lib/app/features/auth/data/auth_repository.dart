@@ -101,7 +101,112 @@ class AuthRepository {
   }
 
   Future<DemoLoginBundle> fetchDemoAccounts({required String role}) async {
-    final response = await _client.getJson('/auth/demo-accounts/$role');
-    return DemoLoginBundle.fromJson(response);
+    try {
+      final response = await _client.getJson('/auth/demo-accounts/$role');
+      final bundle = DemoLoginBundle.fromJson(response);
+      if (bundle.accounts.isNotEmpty) {
+        return bundle;
+      }
+    } on ApiException {
+      // WHY: Email-only seeded shortcuts should stay available even when the backend quick-fill endpoint is disabled or temporarily unavailable.
+    }
+
+    return _fallbackDemoAccounts(role);
+  }
+
+  DemoLoginBundle _fallbackDemoAccounts(String role) {
+    switch (role) {
+      case 'admin':
+        return const DemoLoginBundle(
+          role: 'admin',
+          passwordAutofillEnabled: false,
+          accounts: <DemoLoginAccount>[
+            DemoLoginAccount(
+              id: 'fallback-admin-1',
+              fullName: 'Adams Gafar',
+              email: 'admin@adams.local',
+              role: 'admin',
+              staffType: null,
+              quickFillPassword: null,
+            ),
+          ],
+        );
+      case 'customer':
+        return const DemoLoginBundle(
+          role: 'customer',
+          passwordAutofillEnabled: false,
+          accounts: <DemoLoginAccount>[
+            DemoLoginAccount(
+              id: 'fallback-customer-1',
+              fullName: 'Fatima Kaya',
+              email: 'customer1@adams.local',
+              role: 'customer',
+              staffType: null,
+              quickFillPassword: null,
+            ),
+          ],
+        );
+      case 'staff':
+        return const DemoLoginBundle(
+          role: 'staff',
+          passwordAutofillEnabled: false,
+          accounts: <DemoLoginAccount>[
+            DemoLoginAccount(
+              id: 'fallback-staff-care-1',
+              fullName: 'Amina Yilmaz',
+              email: 'care1@adams.local',
+              role: 'staff',
+              staffType: 'customer_care',
+              quickFillPassword: null,
+            ),
+            DemoLoginAccount(
+              id: 'fallback-staff-1',
+              fullName: 'Daniel Weber',
+              email: 'staff1@adams.local',
+              role: 'staff',
+              staffType: 'technician',
+              quickFillPassword: null,
+            ),
+            DemoLoginAccount(
+              id: 'fallback-staff-2',
+              fullName: 'Sofia Keller',
+              email: 'staff2@adams.local',
+              role: 'staff',
+              staffType: 'contractor',
+              quickFillPassword: null,
+            ),
+            DemoLoginAccount(
+              id: 'fallback-staff-3',
+              fullName: 'Jonas Hartmann',
+              email: 'staff3@adams.local',
+              role: 'staff',
+              staffType: 'technician',
+              quickFillPassword: null,
+            ),
+            DemoLoginAccount(
+              id: 'fallback-staff-4',
+              fullName: 'Leonie Brandt',
+              email: 'staff4@adams.local',
+              role: 'staff',
+              staffType: 'technician',
+              quickFillPassword: null,
+            ),
+            DemoLoginAccount(
+              id: 'fallback-staff-5',
+              fullName: 'Marek Nowak',
+              email: 'staff5@adams.local',
+              role: 'staff',
+              staffType: 'contractor',
+              quickFillPassword: null,
+            ),
+          ],
+        );
+      default:
+        return DemoLoginBundle(
+          role: role,
+          passwordAutofillEnabled: false,
+          accounts: const <DemoLoginAccount>[],
+        );
+    }
   }
 }

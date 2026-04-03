@@ -127,7 +127,6 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
 class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _hasAppliedInitialQuickFill = false;
   bool _isPasswordVisible = false;
   late PublicSiteLanguage _language;
 
@@ -150,13 +149,11 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   String get _quickFillErrorLabel => _isGerman
       ? 'Backend-Konten konnten gerade nicht geladen werden.'
       : 'Unable to load quick fill accounts from the backend right now.';
-  String get _manualPasswordLabel =>
-      _isGerman ? 'Passwort manuell eingeben' : 'Enter password manually';
-  String get _seededPasswordReadyLabel =>
-      _isGerman ? 'Passwort hinterlegt' : 'Seeded password ready';
-  String get _seededPasswordHint => _isGerman
-      ? 'Seed-Konten können in dieser Umgebung ihr Passwort automatisch ergänzen, wenn es vom Backend bereitgestellt wird.'
-      : 'Seeded accounts can autofill their password in this environment when available from the backend.';
+  String get _emailShortcutLabel =>
+      _isGerman ? 'E-Mail einsetzen' : 'Fill email only';
+  String get _quickFillHint => _isGerman
+      ? 'Schnellzugriffe setzen nur die E-Mail ein. Das Passwort geben Sie weiterhin manuell ein.'
+      : 'Quick fill accounts only insert the email. Enter the password manually.';
   String get _secureAccessTitle =>
       _isGerman ? 'Sicherer Zugang' : 'Secure access';
   String get _secureAccessSubtitle => _isGerman
@@ -223,7 +220,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
 
   void _applyQuickFillAccount(DemoLoginAccount account) {
     _emailController.text = account.email;
-    _passwordController.text = account.quickFillPassword ?? '';
+    _passwordController.clear();
     setState(() {});
   }
 
@@ -354,13 +351,9 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  account.quickFillPassword == null
-                      ? _manualPasswordLabel
-                      : _seededPasswordReadyLabel,
+                  _emailShortcutLabel,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: account.quickFillPassword == null
-                        ? AppTheme.ember
-                        : AppTheme.pine,
+                    color: AppTheme.cobalt,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -561,7 +554,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Text(
-                _seededPasswordHint,
+                _quickFillHint,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.ink.withValues(alpha: 0.72),
                   height: 1.45,
@@ -849,20 +842,13 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
       authDemoAccountsProvider(widget.role),
       (previous, next) {
         next.whenData((bundle) {
-          if (_hasAppliedInitialQuickFill || bundle.accounts.isEmpty) {
+          if (bundle.accounts.isEmpty) {
             return;
           }
 
-          final firstAccount = bundle.accounts.first;
-          if (_emailController.text.isEmpty) {
-            _emailController.text = firstAccount.email;
+          if (mounted) {
+            setState(() {});
           }
-          if (_passwordController.text.isEmpty &&
-              firstAccount.quickFillPassword != null) {
-            _passwordController.text = firstAccount.quickFillPassword!;
-          }
-
-          _hasAppliedInitialQuickFill = true;
         });
       },
     );

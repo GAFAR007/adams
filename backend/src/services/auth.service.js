@@ -401,62 +401,6 @@ async function loadVerifiedCustomerRegistration(
   return verification;
 }
 
-function resolveDemoPassword(
-  role,
-  email,
-) {
-  const normalizedEmail =
-    String(email || "").toLowerCase();
-
-  // WHY: Demo autofill passwords are a local/dev convenience and must not survive into production responses.
-  if (
-    process.env.NODE_ENV ===
-    "production"
-  ) {
-    return null;
-  }
-
-  if (
-    role === USER_ROLES.ADMIN &&
-    normalizedEmail ===
-      "admin@adams.local"
-  ) {
-    return (
-      process.env
-        .SEED_ADMIN_PASSWORD ||
-      null
-    );
-  }
-
-  if (
-    role === USER_ROLES.STAFF &&
-    /^(care|staff)\d+@adams\.local$/.test(
-      normalizedEmail,
-    )
-  ) {
-    return (
-      process.env
-        .SEED_STAFF_PASSWORD ||
-      null
-    );
-  }
-
-  if (
-    role === USER_ROLES.CUSTOMER &&
-    /^customer\d+@adams\.local$/.test(
-      normalizedEmail,
-    )
-  ) {
-    return (
-      process.env
-        .SEED_CUSTOMER_PASSWORD ||
-      null
-    );
-  }
-
-  return null;
-}
-
 async function registerCustomer(
   payload,
   meta,
@@ -916,34 +860,24 @@ async function getDemoAccounts(
       "Confirm the role-specific users are ready for quick-fill response shaping",
   });
 
-  const isProduction =
-    process.env.NODE_ENV ===
-    "production";
-
-  // WHY: Keep the public demo-account endpoint safe in production, but expose every active local/dev account so the login shortcuts stay in sync with the database.
-  const accounts = isProduction
-    ? []
-    : users.map((user) => ({
-        id: String(user._id),
-        fullName:
-          `${user.firstName} ${user.lastName}`.trim(),
-        email: user.email,
-        role: user.role,
-        staffType:
-          user.staffType || null,
-        quickFillPassword:
-          resolveDemoPassword(
-            role,
-            user.email,
-          ),
-      }));
+  // WHY: Public login shortcuts should stay in sync with real active accounts across environments, but the user must always type the password manually.
+  const accounts = users.map((user) => ({
+    id: String(user._id),
+    fullName:
+      `${user.firstName} ${user.lastName}`.trim(),
+    email: user.email,
+    role: user.role,
+    staffType:
+      user.staffType || null,
+    quickFillPassword: null,
+  }));
 
   return {
     message:
       "Demo accounts fetched successfully",
     role,
     passwordAutofillEnabled:
-      !isProduction,
+      false,
     accounts,
   };
 }
