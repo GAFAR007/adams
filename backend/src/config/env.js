@@ -38,7 +38,11 @@ const env = Object.freeze({
   // WHY: Freeze config so runtime code cannot mutate shared environment values by accident.
   nodeEnv: process.env.NODE_ENV || "development",
   port: toNumber(process.env.PORT, 4000),
-  host: process.env.HOST || "127.0.0.1",
+  host:
+    process.env.HOST ||
+    (process.env.NODE_ENV === "production"
+      ? "0.0.0.0"
+      : "127.0.0.1"),
   mongoDbUri:
     process.env.MONGODB_URI ||
     "mongodb://127.0.0.1:27017/adams",
