@@ -7,6 +7,7 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const { emitRequestUpdated } = require('../realtime/socket');
 const adminService = require('../services/admin.service');
 
 const adminDashboardController = asyncHandler(async (req, res) => {
@@ -19,6 +20,22 @@ const adminDashboardController = asyncHandler(async (req, res) => {
 
   // WHY: Keep aggregation and data loading in the service so the controller only shapes HTTP behavior.
   const result = await adminService.getDashboard(logContext);
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminCalendarController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminGetCalendar',
+    intent: 'Fetch shared calendar jobs for the admin planning view',
+  });
+
+  const result = await adminService.listCalendarRequests(req.query, logContext);
   res.status(200).json(result);
 
   logInfo({
@@ -54,6 +71,50 @@ const adminAssignRequestController = asyncHandler(async (req, res) => {
   // WHY: The service owns assignment validation so the controller does not duplicate staff/request checks.
   const result = await adminService.assignRequest(req.params.requestId, req.body.staffId, logContext);
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminDeliverRequestController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminDeliverRequest',
+    intent: 'Mark a completed job as delivered from the admin request workspace',
+  });
+
+  const result = await adminService.deliverRequest(
+    req.authUser,
+    req.params.requestId,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminSelectRequestEstimationController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminSelectRequestEstimation',
+    intent: 'Select a staff estimate to drive quotation and reserved scheduling',
+  });
+
+  const result = await adminService.selectRequestEstimation(
+    req.authUser,
+    req.params.requestId,
+    req.body.estimationId,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -65,7 +126,7 @@ const adminCreateRequestInvoiceController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
     operation: 'AdminCreateRequestInvoice',
-    intent: 'Send an invoice and payment instructions from the admin request workspace',
+    intent: 'Save the internal quote review package from the admin request workspace',
   });
 
   const result = await adminService.createRequestInvoice(
@@ -75,6 +136,53 @@ const adminCreateRequestInvoiceController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminPostRequestMessageController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminPostRequestMessage',
+    intent: 'Append an admin reply onto a request thread from the admin workspace',
+  });
+
+  const result = await adminService.postRequestMessage(
+    req.authUser,
+    req.params.requestId,
+    req.body.message,
+    req.body.actionType,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const adminUploadRequestAttachmentController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'AdminUploadRequestAttachment',
+    intent: 'Upload an admin chat attachment into a request thread',
+  });
+
+  const result = await adminService.uploadRequestAttachment(
+    req.authUser,
+    req.params.requestId,
+    req.file,
+    req.body.caption,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -97,6 +205,7 @@ const adminReviewPaymentProofController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -174,12 +283,17 @@ const adminListStaffInvitesController = asyncHandler(async (req, res) => {
 
 module.exports = {
   adminAssignRequestController,
+  adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
+  adminDeliverRequestController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
+  adminPostRequestMessageController,
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminSelectRequestEstimationController,
+  adminUploadRequestAttachmentController,
 };

@@ -7,6 +7,10 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const {
+  emitInternalChatDirectoryUpdated,
+  emitRequestUpdated,
+} = require('../realtime/socket');
 const { setRefreshCookie } = require('../services/token.service');
 const staffService = require('../services/staff.service');
 
@@ -60,6 +64,49 @@ const staffDashboardController = asyncHandler(async (req, res) => {
   });
 });
 
+const staffCalendarController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffGetCalendar',
+    intent: 'Fetch shared calendar jobs for the signed-in staff member',
+  });
+
+  const result = await staffService.listCalendarRequests(
+    req.authUser.id,
+    req.query,
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffClockRequestWorkController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffClockRequestWork',
+    intent: 'Clock the signed-in staff member into or out of a scheduled request on its event day',
+  });
+
+  const result = await staffService.clockAssignedRequestWork(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.action,
+    req.body.note || '',
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const staffUpdateAvailabilityController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -74,6 +121,7 @@ const staffUpdateAvailabilityController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatDirectoryUpdated(result.user?.id || req.authUser.id);
 
   logInfo({
     ...logContext,
@@ -95,6 +143,7 @@ const staffAttendQueueRequestController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -131,9 +180,11 @@ const staffUpdateRequestStatusController = asyncHandler(async (req, res) => {
     req.authUser.id,
     req.params.requestId,
     req.body.status,
+    req.body.password || '',
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -157,6 +208,95 @@ const staffPostRequestMessageController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffSuggestRequestReplyController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffSuggestRequestReply',
+    intent: 'Generate a professional staff reply suggestion for an assigned customer thread',
+  });
+
+  const result = await staffService.suggestAssignedRequestReply(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.draft || '',
+    logContext,
+  );
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffUploadRequestAttachmentController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffUploadRequestAttachment',
+    intent: 'Upload a staff chat attachment into an assigned customer thread',
+  });
+
+  const result = await staffService.uploadAssignedRequestAttachment(
+    req.authUser.id,
+    req.params.requestId,
+    req.file,
+    req.body.caption,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffSubmitRequestEstimationController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffSubmitRequestEstimation',
+    intent: 'Submit an estimate for an assigned request before customer care sends a quotation',
+  });
+
+  const result = await staffService.submitAssignedRequestEstimation(
+    req.authUser.id,
+    req.params.requestId,
+    req.body,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffUpdateRequestAiControlController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffUpdateRequestAiControl',
+    intent: 'Toggle whether Naima is covering an assigned customer chat',
+  });
+
+  const result = await staffService.updateAssignedRequestAiControl(
+    req.authUser.id,
+    req.params.requestId,
+    req.body.enabled,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -168,7 +308,7 @@ const staffCreateRequestInvoiceController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
     operation: 'StaffCreateRequestInvoice',
-    intent: 'Send an invoice and payment instructions from the assigned staff chat',
+    intent: 'Let customer care send the final quotation from the request chat',
   });
 
   const result = await staffService.createAssignedRequestInvoice(
@@ -178,6 +318,7 @@ const staffCreateRequestInvoiceController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -200,6 +341,29 @@ const staffReviewPaymentProofController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitRequestUpdated(result.request);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const staffUnlockInvoiceProofUploadController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'StaffUnlockInvoiceProofUpload',
+    intent:
+      'Allow customer care to reopen payment-proof upload from the request chat',
+  });
+
+  const result = await staffService.unlockAssignedRequestInvoiceProofUpload(
+    req.authUser.id,
+    req.params.requestId,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitRequestUpdated(result.request);
 
   logInfo({
     ...logContext,
@@ -209,12 +373,19 @@ const staffReviewPaymentProofController = asyncHandler(async (req, res) => {
 
 module.exports = {
   staffAttendQueueRequestController,
+  staffCalendarController,
+  staffClockRequestWorkController,
   staffCreateRequestInvoiceController,
   staffDashboardController,
   staffListRequestsController,
   staffPostRequestMessageController,
+  staffSuggestRequestReplyController,
+  staffUnlockInvoiceProofUploadController,
   staffReviewPaymentProofController,
   staffRegisterController,
+  staffSubmitRequestEstimationController,
+  staffUploadRequestAttachmentController,
   staffUpdateAvailabilityController,
+  staffUpdateRequestAiControlController,
   staffUpdateRequestStatusController,
 };

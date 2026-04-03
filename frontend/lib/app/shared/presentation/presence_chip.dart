@@ -24,23 +24,21 @@ class PresenceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final backgroundColor = dark
-        ? Colors.white.withValues(alpha: 0.08)
+        ? AppTheme.darkSurfaceMuted
         : isOnline
-        ? AppTheme.pine.withValues(alpha: 0.12)
-        : AppTheme.ink.withValues(alpha: 0.06);
+        ? AppTheme.successSurface
+        : AppTheme.shellMuted;
     final borderColor = dark
-        ? Colors.white.withValues(alpha: 0.08)
+        ? AppTheme.darkBorder
         : isOnline
-        ? AppTheme.pine.withValues(alpha: 0.18)
-        : AppTheme.ink.withValues(alpha: 0.09);
-    final foregroundColor = dark
-        ? Colors.white.withValues(alpha: 0.82)
-        : AppTheme.ink.withValues(alpha: 0.84);
+        ? AppTheme.pine.withValues(alpha: 0.34)
+        : AppTheme.border.withValues(alpha: 0.74);
+    final foregroundColor = dark ? AppTheme.darkText : AppTheme.ink;
     final dotColor = isOnline
         ? AppTheme.pine
         : dark
-        ? Colors.white.withValues(alpha: 0.36)
-        : AppTheme.ink.withValues(alpha: 0.34);
+        ? AppTheme.darkTextSoft
+        : AppTheme.textMuted;
 
     return DecoratedBox(
       decoration: BoxDecoration(

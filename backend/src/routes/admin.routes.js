@@ -8,14 +8,19 @@ const express = require("express");
 
 const {
   adminAssignRequestController,
+  adminCalendarController,
   adminCreateRequestInvoiceController,
   adminCreateStaffInviteController,
+  adminDeliverRequestController,
   adminDeleteStaffInviteController,
   adminDashboardController,
   adminListRequestsController,
+  adminPostRequestMessageController,
   adminListStaffController,
   adminListStaffInvitesController,
   adminReviewPaymentProofController,
+  adminSelectRequestEstimationController,
+  adminUploadRequestAttachmentController,
 } = require("../controllers/admin.controller");
 const {
   createDirectInternalChatController,
@@ -23,10 +28,15 @@ const {
   listInternalChatsController,
   markInternalChatReadController,
   postInternalChatMessageController,
+  suggestInternalChatReplyController,
+  uploadInternalChatAttachmentController,
 } = require("../controllers/internal-chat.controller");
 const {
   USER_ROLES,
 } = require("../constants/app.constants");
+const {
+  requestAttachmentUploadMiddleware,
+} = require("../middleware/upload.middleware");
 const {
   requireAuth,
   requireRoles,
@@ -36,17 +46,24 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   adminAssignRequestValidator,
+  adminCalendarFiltersValidator,
   adminCreateRequestInvoiceValidator,
   adminCreateStaffInviteValidator,
+  adminDeliverRequestValidator,
   adminDeleteStaffInviteValidator,
+  adminPostRequestMessageValidator,
   adminRequestFiltersValidator,
   adminReviewPaymentProofValidator,
+  adminSelectRequestEstimationValidator,
+  adminUploadRequestAttachmentValidator,
 } = require("../validators/admin.validators");
 const {
   createDirectInternalChatValidator,
   createGroupInternalChatValidator,
   markInternalChatReadValidator,
   postInternalChatMessageValidator,
+  suggestInternalChatReplyValidator,
+  uploadInternalChatAttachmentValidator,
 } = require("../validators/internal-chat.validators");
 
 function createAdminRouter() {
@@ -62,6 +79,12 @@ function createAdminRouter() {
     adminDashboardController,
   );
   router.get(
+    "/calendar",
+    adminCalendarFiltersValidator,
+    validateRequest,
+    adminCalendarController,
+  );
+  router.get(
     "/requests",
     adminRequestFiltersValidator,
     validateRequest,
@@ -72,6 +95,31 @@ function createAdminRouter() {
     adminAssignRequestValidator,
     validateRequest,
     adminAssignRequestController,
+  );
+  router.patch(
+    "/requests/:requestId/deliver",
+    adminDeliverRequestValidator,
+    validateRequest,
+    adminDeliverRequestController,
+  );
+  router.patch(
+    "/requests/:requestId/estimations/select",
+    adminSelectRequestEstimationValidator,
+    validateRequest,
+    adminSelectRequestEstimationController,
+  );
+  router.post(
+    "/requests/:requestId/messages",
+    adminPostRequestMessageValidator,
+    validateRequest,
+    adminPostRequestMessageController,
+  );
+  router.post(
+    "/requests/:requestId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    adminUploadRequestAttachmentValidator,
+    validateRequest,
+    adminUploadRequestAttachmentController,
   );
   router.post(
     "/requests/:requestId/invoice",
@@ -126,6 +174,19 @@ function createAdminRouter() {
     postInternalChatMessageValidator,
     validateRequest,
     postInternalChatMessageController,
+  );
+  router.post(
+    "/internal-chats/:threadId/messages/attachment",
+    requestAttachmentUploadMiddleware,
+    uploadInternalChatAttachmentValidator,
+    validateRequest,
+    uploadInternalChatAttachmentController,
+  );
+  router.post(
+    "/internal-chats/:threadId/reply-assistant",
+    suggestInternalChatReplyValidator,
+    validateRequest,
+    suggestInternalChatReplyController,
   );
   router.post(
     "/internal-chats/:threadId/read",

@@ -10,9 +10,13 @@ const {
   customerCreateRequestController,
   customerListRequestsController,
   customerPostRequestMessageController,
+  customerSuggestRequestReplyController,
+  customerReplaceRequestAttachmentController,
   customerUploadPaymentProofController,
   customerUploadRequestAttachmentController,
   customerUpdateRequestController,
+  customerAutocompleteAddressController,
+  customerVerifyAddressController,
 } = require("../controllers/customer.controller");
 const {
   USER_ROLES,
@@ -23,6 +27,7 @@ const {
 } = require("../middleware/auth.middleware");
 const {
   paymentProofUploadMiddleware,
+  requestIntakeUploadMiddleware,
   requestAttachmentUploadMiddleware,
 } = require("../middleware/upload.middleware");
 const {
@@ -31,9 +36,13 @@ const {
 const {
   customerCreateRequestValidator,
   customerPostRequestMessageValidator,
+  customerSuggestRequestReplyValidator,
   customerUploadPaymentProofValidator,
   customerUploadRequestAttachmentValidator,
+  customerReplaceRequestAttachmentValidator,
   customerUpdateRequestValidator,
+  customerAutocompleteAddressValidator,
+  customerVerifyAddressValidator,
 } = require("../validators/customer.validators");
 
 function createCustomerRouter() {
@@ -46,6 +55,7 @@ function createCustomerRouter() {
 
   router.post(
     "/requests",
+    requestIntakeUploadMiddleware,
     customerCreateRequestValidator,
     validateRequest,
     customerCreateRequestController,
@@ -53,6 +63,18 @@ function createCustomerRouter() {
   router.get(
     "/requests",
     customerListRequestsController,
+  );
+  router.get(
+    "/address/autocomplete",
+    customerAutocompleteAddressValidator,
+    validateRequest,
+    customerAutocompleteAddressController,
+  );
+  router.post(
+    "/address/verify",
+    customerVerifyAddressValidator,
+    validateRequest,
+    customerVerifyAddressController,
   );
   router.patch(
     "/requests/:requestId",
@@ -73,6 +95,19 @@ function createCustomerRouter() {
     customerUploadRequestAttachmentValidator,
     validateRequest,
     customerUploadRequestAttachmentController,
+  );
+  router.post(
+    "/requests/:requestId/messages/:messageId/attachment/replace",
+    requestAttachmentUploadMiddleware,
+    customerReplaceRequestAttachmentValidator,
+    validateRequest,
+    customerReplaceRequestAttachmentController,
+  );
+  router.post(
+    "/requests/:requestId/reply-assistant",
+    customerSuggestRequestReplyValidator,
+    validateRequest,
+    customerSuggestRequestReplyController,
   );
   router.post(
     "/requests/:requestId/messages",

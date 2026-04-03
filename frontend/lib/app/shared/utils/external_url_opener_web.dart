@@ -4,7 +4,21 @@ library;
 
 import 'dart:html' as html;
 
-Future<bool> openExternalUrl(String url) async {
-  html.window.open(url, '_blank');
+Future<bool> openExternalUrl(String url, {bool sameTab = false}) async {
+  final normalized = url.trim();
+  if (normalized.isEmpty) {
+    return false;
+  }
+
+  final uri = Uri.tryParse(normalized);
+  final scheme = uri?.scheme.toLowerCase() ?? '';
+  final isBrowserNavigation = scheme == 'http' || scheme == 'https';
+
+  if (sameTab || !isBrowserNavigation) {
+    html.window.location.href = normalized;
+    return true;
+  }
+
+  html.window.open(normalized, '_blank');
   return true;
 }

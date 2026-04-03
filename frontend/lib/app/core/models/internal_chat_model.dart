@@ -3,6 +3,22 @@
 /// HOW: Map directory users, typed chat threads, and receipt-aware messages into immutable Dart models with UI-friendly getters.
 library;
 
+import '../../config/app_config.dart';
+
+String? _resolveAbsoluteFileUrl(String relativeUrl) {
+  if (relativeUrl.trim().isEmpty) {
+    return null;
+  }
+
+  final apiBaseUri = Uri.tryParse(AppConfig.apiBaseUrl);
+  final relativeUri = Uri.tryParse(relativeUrl);
+  if (apiBaseUri == null || relativeUri == null) {
+    return relativeUrl;
+  }
+
+  return apiBaseUri.resolveUri(relativeUri).toString();
+}
+
 class InternalChatUserModel {
   const InternalChatUserModel({
     required this.id,
@@ -12,6 +28,7 @@ class InternalChatUserModel {
     required this.email,
     required this.phone,
     required this.role,
+    required this.staffType,
     required this.status,
     required this.staffAvailability,
   });
@@ -23,11 +40,24 @@ class InternalChatUserModel {
   final String email;
   final String? phone;
   final String role;
+  final String? staffType;
   final String status;
   final String? staffAvailability;
 
   bool get isOnline => staffAvailability == 'online';
-  String get roleLabel => role == 'admin' ? 'Admin' : 'Staff';
+  String get roleLabel {
+    switch (staffType) {
+      case 'customer_care':
+        return 'Customer Care';
+      case 'contractor':
+        return 'Contractor';
+      case 'technician':
+        return 'Technician';
+      default:
+        return role == 'admin' ? 'Admin' : 'Staff';
+    }
+  }
+
   String get shortName =>
       firstName.trim().isNotEmpty ? firstName.trim() : fullName;
 
@@ -40,8 +70,37 @@ class InternalChatUserModel {
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
       role: json['role'] as String? ?? 'staff',
+      staffType: json['staffType'] as String?,
       status: json['status'] as String? ?? 'active',
       staffAvailability: json['staffAvailability'] as String?,
+    );
+  }
+}
+
+class InternalChatAttachmentModel {
+  const InternalChatAttachmentModel({
+    required this.originalName,
+    required this.storedName,
+    required this.mimeType,
+    required this.sizeBytes,
+    required this.relativeUrl,
+  });
+
+  final String originalName;
+  final String storedName;
+  final String mimeType;
+  final int sizeBytes;
+  final String relativeUrl;
+
+  String? get fileUrl => _resolveAbsoluteFileUrl(relativeUrl);
+
+  factory InternalChatAttachmentModel.fromJson(Map<String, dynamic> json) {
+    return InternalChatAttachmentModel(
+      originalName: json['originalName'] as String? ?? '',
+      storedName: json['storedName'] as String? ?? '',
+      mimeType: json['mimeType'] as String? ?? '',
+      sizeBytes: json['sizeBytes'] as int? ?? 0,
+      relativeUrl: json['relativeUrl'] as String? ?? '',
     );
   }
 }
@@ -53,6 +112,7 @@ class InternalChatMessageModel {
     required this.senderName,
     required this.senderRole,
     required this.text,
+    required this.attachment,
     required this.createdAt,
     required this.isOwn,
     required this.receiptStatus,
@@ -63,6 +123,7 @@ class InternalChatMessageModel {
   final String senderName;
   final String? senderRole;
   final String text;
+  final InternalChatAttachmentModel? attachment;
   final DateTime? createdAt;
   final bool isOwn;
   final String? receiptStatus;
@@ -74,6 +135,11 @@ class InternalChatMessageModel {
       senderName: json['senderName'] as String? ?? '',
       senderRole: json['senderRole'] as String?,
       text: json['text'] as String? ?? '',
+      attachment: json['attachment'] is Map<String, dynamic>
+          ? InternalChatAttachmentModel.fromJson(
+              json['attachment'] as Map<String, dynamic>,
+            )
+          : null,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
       isOwn: json['isOwn'] as bool? ?? false,
       receiptStatus: json['receiptStatus'] as String?,

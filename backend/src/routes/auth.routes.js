@@ -13,6 +13,8 @@ const {
   meController,
   refreshController,
   registerCustomerController,
+  requestCustomerRegistrationCodeController,
+  verifyCustomerRegistrationCodeController,
 } = require("../controllers/auth.controller");
 const {
   requireAuth,
@@ -25,6 +27,8 @@ const {
 } = require("../middleware/validate.middleware");
 const {
   customerRegisterValidator,
+  customerRegistrationCodeRequestValidator,
+  customerRegistrationCodeVerifyValidator,
   demoAccountsValidator,
   loginValidator,
 } = require("../validators/auth.validators");
@@ -34,6 +38,20 @@ function createAuthRouter() {
   const authRateLimit =
     createAuthRateLimitMiddleware();
 
+  router.post(
+    "/customer/register/request-code",
+    authRateLimit,
+    customerRegistrationCodeRequestValidator,
+    validateRequest,
+    requestCustomerRegistrationCodeController,
+  );
+  router.post(
+    "/customer/register/verify-code",
+    authRateLimit,
+    customerRegistrationCodeVerifyValidator,
+    validateRequest,
+    verifyCustomerRegistrationCodeController,
+  );
   router.post(
     "/customer/register",
     authRateLimit,

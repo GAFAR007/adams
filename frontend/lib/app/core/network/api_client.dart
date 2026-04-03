@@ -20,9 +20,38 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 });
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(
+    this.message, {
+    this.classification,
+    this.debugDetails,
+    this.errorCode,
+    this.requestId,
+    this.resolutionHint,
+    this.statusCode,
+  });
 
   final String message;
+  final String? classification;
+  final String? debugDetails;
+  final String? errorCode;
+  final String? requestId;
+  final String? resolutionHint;
+  final int? statusCode;
+
+  String get debugSummary {
+    final lines = <String>[
+      if (statusCode != null) 'HTTP $statusCode',
+      if (errorCode != null && errorCode!.isNotEmpty) 'Code: $errorCode',
+      if (requestId != null && requestId!.isNotEmpty) 'Request: $requestId',
+      if (classification != null && classification!.isNotEmpty)
+        'Class: $classification',
+      if (resolutionHint != null && resolutionHint!.isNotEmpty)
+        'Hint: $resolutionHint',
+      if (debugDetails != null && debugDetails!.isNotEmpty) debugDetails!,
+    ];
+
+    return lines.join('\n');
+  }
 
   @override
   String toString() => message;
@@ -74,7 +103,7 @@ class ApiClient {
         return _normalizeResponse(fallbackResponse.data);
       }
 
-      throw ApiException(_extractMessage(error));
+      throw _buildApiException(error);
     }
   }
 
@@ -95,7 +124,7 @@ class ApiClient {
         return _normalizeResponse(fallbackResponse.data);
       }
 
-      throw ApiException(_extractMessage(error));
+      throw _buildApiException(error);
     }
   }
 
@@ -116,19 +145,21 @@ class ApiClient {
         return _normalizeResponse(fallbackResponse.data);
       }
 
-      throw ApiException(_extractMessage(error));
+      throw _buildApiException(error);
     }
   }
 
   Future<Map<String, dynamic>> postFormData(
     String path, {
-    required FormData data,
+    required FormData Function() createData,
+    void Function(int sent, int total)? onSendProgress,
   }) async {
     try {
       final response = await _dio.post<Object>(
         path,
-        data: data,
+        data: createData(),
         options: Options(contentType: 'multipart/form-data'),
+        onSendProgress: onSendProgress,
       );
       return _normalizeResponse(response.data);
     } on DioException catch (error) {
@@ -136,8 +167,9 @@ class ApiClient {
         error,
         () => _dio.post<Object>(
           path,
-          data: data,
+          data: createData(),
           options: Options(contentType: 'multipart/form-data'),
+          onSendProgress: onSendProgress,
         ),
       );
 
@@ -145,7 +177,7 @@ class ApiClient {
         return _normalizeResponse(fallbackResponse.data);
       }
 
-      throw ApiException(_extractMessage(error));
+      throw _buildApiException(error);
     }
   }
 
@@ -163,7 +195,7 @@ class ApiClient {
         return _normalizeResponse(fallbackResponse.data);
       }
 
-      throw ApiException(_extractMessage(error));
+      throw _buildApiException(error);
     }
   }
 
@@ -237,22 +269,33 @@ class ApiClient {
     return null;
   }
 
-  String _extractMessage(DioException error) {
+  ApiException _buildApiException(DioException error) {
     final responseData = error.response?.data;
 
     if (responseData is Map<String, dynamic>) {
       final safeMessage = responseData['message'];
+      final classification = responseData['classification'];
+      final errorCode = responseData['error_code'];
       final hint = responseData['resolution_hint'];
+      final requestId = responseData['requestId'];
 
-      if (safeMessage is String && hint is String && hint.isNotEmpty) {
-        return '$safeMessage\n$hint';
-      }
-
-      if (safeMessage is String && safeMessage.isNotEmpty) {
-        return safeMessage;
-      }
+      return ApiException(
+        safeMessage is String && safeMessage.isNotEmpty
+            ? safeMessage
+            : 'The request failed',
+        classification: classification is String ? classification : null,
+        errorCode: errorCode is String ? errorCode : null,
+        requestId: requestId is String ? requestId : null,
+        resolutionHint: hint is String ? hint : null,
+        statusCode: error.response?.statusCode,
+      );
     }
 
-    return error.message ?? 'The request failed';
+    final fallbackMessage = error.message ?? 'The request failed';
+    return ApiException(
+      fallbackMessage,
+      debugDetails: 'Dio ${error.type.name}: $fallbackMessage',
+      statusCode: error.response?.statusCode,
+    );
   }
 }

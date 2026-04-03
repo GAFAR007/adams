@@ -60,6 +60,32 @@ function humanizeOperation(operation) {
     );
 }
 
+function formatProviderName(value) {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return "-";
+  }
+
+  if (normalized.toLowerCase() === "brevo") {
+    return "Brevo";
+  }
+
+  if (normalized.toLowerCase() === "cloudinary") {
+    return "Cloudinary";
+  }
+
+  if (normalized.toLowerCase() === "groq") {
+    return "Groq";
+  }
+
+  if (normalized.toLowerCase() === "google-maps") {
+    return "Google Maps";
+  }
+
+  return normalized;
+}
+
 const OPERATION_LABELS = {
   RegisterCustomer: "Customer sign-up",
   LoginUser: "Login",
@@ -95,6 +121,38 @@ const OPERATION_LABELS = {
 function buildStageMessage(entry) {
   const summaryKey = `${entry.operation}:${entry.step}`;
 
+  if (summaryKey === "FileStorageStatus:SERVICE_OK") {
+    if (entry.storageMode === "cloudinary") {
+      return `File storage ready (${formatProviderName("cloudinary")} · ${formatPrimitive(entry.cloudName)})`;
+    }
+
+    return "File storage ready (local uploads)";
+  }
+
+  if (summaryKey === "EmailProviderStatus:SERVICE_OK") {
+    if (entry.provider && entry.provider !== "disabled") {
+      return `Email provider ready (${formatProviderName(entry.provider)} · ${formatPrimitive(entry.sender)})`;
+    }
+
+    return "Email provider disabled";
+  }
+
+  if (summaryKey === "AiProviderStatus:SERVICE_OK") {
+    if (entry.provider && entry.provider !== "disabled") {
+      return `AI provider ready (${formatProviderName(entry.provider)} · ${formatPrimitive(entry.model)})`;
+    }
+
+    return "AI provider disabled";
+  }
+
+  if (summaryKey === "AddressValidationStatus:SERVICE_OK") {
+    if (entry.provider && entry.provider !== "disabled") {
+      return `Address verification ready (${formatProviderName(entry.provider)})`;
+    }
+
+    return "Address verification disabled";
+  }
+
   // WHY: Prefer explicit stage labels for common flows so local logs read like plain English.
   const summaryMap = {
     "DatabaseConnect:DB_QUERY_START":
@@ -104,6 +162,38 @@ function buildStageMessage(entry) {
     "DatabaseConnect:DB_QUERY_FAIL":
       "MongoDB connection failed",
     "ServerStart:SERVICE_OK": `Server ready on ${formatPrimitive(entry.host) || "127.0.0.1"}:${formatPrimitive(entry.port)}`,
+    "SocketIoAttach:SERVICE_OK":
+      "Socket.IO ready",
+    "SocketIoConnect:AUTH_OK":
+      "Socket.IO client connected",
+    "SocketIoDisconnect:SERVICE_OK":
+      "Socket.IO client disconnected",
+    "SocketIoAuth:AUTH_FAIL":
+      "Socket.IO authentication failed",
+    "CustomerAddressVerification:PROVIDER_CALL_START":
+      "Google address verification started",
+    "CustomerAddressVerification:PROVIDER_CALL_OK":
+      "Google address verification completed",
+    "CustomerAddressVerification:PROVIDER_CALL_FAIL":
+      "Google address verification failed",
+    "CustomerAddressAutocomplete:PROVIDER_CALL_START":
+      "Google address predictions started",
+    "CustomerAddressAutocomplete:PROVIDER_CALL_OK":
+      "Google address predictions completed",
+    "CustomerAddressAutocomplete:PROVIDER_CALL_FAIL":
+      "Google address predictions failed",
+    "StorePaymentProofFile:PROVIDER_CALL_START":
+      "Cloudinary payment-proof upload started",
+    "StorePaymentProofFile:PROVIDER_CALL_OK":
+      "Cloudinary payment-proof upload succeeded",
+    "StorePaymentProofFile:PROVIDER_CALL_FAIL":
+      "Cloudinary payment-proof upload failed",
+    "StoreRequestAttachmentFile:PROVIDER_CALL_START":
+      "Cloudinary request-attachment upload started",
+    "StoreRequestAttachmentFile:PROVIDER_CALL_OK":
+      "Cloudinary request-attachment upload succeeded",
+    "StoreRequestAttachmentFile:PROVIDER_CALL_FAIL":
+      "Cloudinary request-attachment upload failed",
     "ServerStart:SERVICE_FAIL":
       "Server failed to start",
     "SeedDatabase:SERVICE_START":

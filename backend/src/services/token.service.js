@@ -34,6 +34,22 @@ function createAccessToken(user) {
   );
 }
 
+function verifyAccessToken(accessToken) {
+  try {
+    // WHY: Verify the signature before trusting any bearer token claim in HTTP or Socket.IO auth flows.
+    return jwt.verify(accessToken, env.jwtAccessSecret);
+  } catch (error) {
+    throw new AppError({
+      message: 'Authentication failed',
+      statusCode: 401,
+      classification: ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode: 'AUTH_ACCESS_TOKEN_INVALID',
+      resolutionHint: 'Log in again to obtain a fresh access token',
+      step: LOG_STEPS.AUTH_FAIL,
+    });
+  }
+}
+
 async function issueSessionTokens(user, meta, logContext) {
   logInfo({
     ...logContext,
@@ -256,6 +272,7 @@ function signStaffInviteToken(invite) {
     {
       inviteId: invite.inviteId,
       email: invite.email,
+      staffType: invite.staffType || null,
       tokenType: 'staff_invite',
     },
     env.jwtInviteSecret,
@@ -329,5 +346,6 @@ module.exports = {
   rotateRefreshSession,
   revokeRefreshSession,
   setRefreshCookie,
+  verifyAccessToken,
   verifyStaffInviteToken,
 };

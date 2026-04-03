@@ -4,6 +4,8 @@
  * HOW: Load validated environment settings, connect MongoDB, create the app, and start listening.
  */
 
+const http = require('http');
+
 const {
   buildApp,
 } = require("./src/app");
@@ -17,6 +19,21 @@ const {
   logError,
   logInfo,
 } = require("./src/utils/logger");
+const {
+  logFileStorageStatus,
+} = require('./src/services/file-storage.service');
+const {
+  logEmailProviderStatus,
+} = require('./src/services/email.service');
+const {
+  logAiProviderStatus,
+} = require('./src/services/service-concierge.service');
+const {
+  logAddressValidationStatus,
+} = require('./src/services/address-validation.service');
+const {
+  attachSocketServer,
+} = require('./src/realtime/socket');
 
 async function startServer() {
   // WHY: Refuse to accept traffic until the database is reachable.
@@ -24,8 +41,14 @@ async function startServer() {
 
   // WHY: Build the Express app only after core infrastructure is ready.
   const app = buildApp();
+  const server = http.createServer(app);
+  attachSocketServer(server);
+  logFileStorageStatus();
+  logEmailProviderStatus();
+  logAiProviderStatus();
+  logAddressValidationStatus();
 
-  return app.listen(env.port, env.host, () => {
+  return server.listen(env.port, env.host, () => {
     // WHY: Emit the final startup checkpoint only when the process is actually listening.
     logInfo({
       requestId: "system",
@@ -57,9 +80,13 @@ if (require.main === module) {
       businessIdPresent: false,
       userRole: "system",
       classification:
+        error.adamsClassification ||
         "UNKNOWN_PROVIDER_ERROR",
-      error_code: "SERVER_START_FAILED",
+      error_code:
+        error.adamsErrorCode ||
+        "SERVER_START_FAILED",
       resolution_hint:
+        error.adamsResolutionHint ||
         "Check environment variables and MongoDB availability",
       message: error.message,
     });

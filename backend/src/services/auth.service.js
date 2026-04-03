@@ -4,8 +4,12 @@
  * HOW: Validate account state, hash/check passwords, issue tokens, and return safe user payloads.
  */
 
-const bcrypt = require("bcryptjs");
+const crypto = require('crypto');
 
+const bcrypt = require("bcryptjs");
+const jwt = require('jsonwebtoken');
+
+const { env } = require('../config/env');
 const {
   ERROR_CLASSIFICATIONS,
   LOG_STEPS,
@@ -13,11 +17,18 @@ const {
   USER_STATUSES,
 } = require("../constants/app.constants");
 const {
+  CustomerRegistrationVerification,
+} = require('../models/customer-registration-verification.model');
+const {
   User,
 } = require("../models/user.model");
 const {
+  sendCustomerRegistrationCodeEmail,
+} = require('./email.service');
+const {
   AppError,
 } = require("../utils/app-error");
+const { hashValue } = require('../utils/security');
 const {
   logError,
   logInfo,
@@ -30,6 +41,365 @@ const {
   revokeRefreshSession,
   rotateRefreshSession,
 } = require("./token.service");
+
+const CUSTOMER_REGISTRATION_PURPOSE =
+  'customer_register';
+
+function normalizeEmail(email) {
+  return String(email || '')
+    .trim()
+    .toLowerCase();
+}
+
+function createRegistrationCode() {
+  return crypto
+    .randomInt(0, 1000000)
+    .toString()
+    .padStart(6, '0');
+}
+
+function createCustomerRegistrationVerificationToken(
+  verification,
+) {
+  return jwt.sign(
+    {
+      email: verification.email,
+      purpose: verification.purpose,
+      verificationId: String(
+        verification._id,
+      ),
+      tokenType:
+        'customer_registration_verification',
+    },
+    env.jwtCustomerRegistrationSecret,
+    {
+      expiresIn:
+        env.customerRegistrationVerificationTokenTtl,
+    },
+  );
+}
+
+function verifyCustomerRegistrationVerificationToken(
+  verificationToken,
+) {
+  try {
+    return jwt.verify(
+      verificationToken,
+      env.jwtCustomerRegistrationSecret,
+    );
+  } catch (error) {
+    throw new AppError({
+      message:
+        'Your email verification has expired',
+      statusCode: 401,
+      classification:
+        ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode:
+        'CUSTOMER_REGISTER_VERIFICATION_INVALID',
+      resolutionHint:
+        'Request a new verification code and try again',
+      step: LOG_STEPS.AUTH_FAIL,
+    });
+  }
+}
+
+async function ensureCustomerEmailAvailable(
+  email,
+) {
+  const existingUser =
+    await User.findOne({ email });
+
+  if (existingUser) {
+    throw new AppError({
+      message:
+        'This email already has an account. Please log in instead.',
+      statusCode: 409,
+      classification:
+        ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode:
+        'CUSTOMER_REGISTER_EMAIL_TAKEN',
+      resolutionHint:
+        'Log in instead or reset the password for the existing account',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+}
+
+async function requestCustomerRegistrationCode(
+  payload,
+  logContext,
+) {
+  const normalizedEmail =
+    normalizeEmail(payload.email);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation:
+      'RequestCustomerRegistrationCode',
+    intent:
+      'Send a one-time email code before customer account creation',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation:
+      'RequestCustomerRegistrationCode',
+    intent:
+      'Check whether the customer email already belongs to an existing account',
+  });
+
+  await ensureCustomerEmailAvailable(
+    normalizedEmail,
+  );
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation:
+      'RequestCustomerRegistrationCode',
+    intent:
+      'Confirm the customer email is available for a new account',
+  });
+
+  const code =
+    createRegistrationCode();
+  const expiresAt =
+    new Date(
+      Date.now() +
+        env.customerRegistrationCodeTtlMinutes *
+          60 *
+          1000,
+    );
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation:
+      'RequestCustomerRegistrationCode',
+    intent:
+      'Store the latest hashed verification code for the customer email',
+  });
+
+  await CustomerRegistrationVerification.findOneAndUpdate(
+    {
+      email: normalizedEmail,
+      purpose:
+        CUSTOMER_REGISTRATION_PURPOSE,
+    },
+    {
+      email: normalizedEmail,
+      purpose:
+        CUSTOMER_REGISTRATION_PURPOSE,
+      codeHash: hashValue(code),
+      expiresAt,
+      lastSentAt: new Date(),
+      verifiedAt: null,
+    },
+    {
+      upsert: true,
+      returnDocument: 'after',
+      setDefaultsOnInsert: true,
+    },
+  );
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation:
+      'RequestCustomerRegistrationCode',
+    intent:
+      'Confirm the new verification code record is ready before sending email',
+  });
+
+  await sendCustomerRegistrationCodeEmail(
+    {
+      email: normalizedEmail,
+      firstName: payload.firstName || '',
+      code,
+      expiresInMinutes:
+        env.customerRegistrationCodeTtlMinutes,
+    },
+    logContext,
+  );
+
+  return {
+    message:
+      'Verification code sent successfully',
+  };
+}
+
+async function verifyCustomerRegistrationCode(
+  payload,
+  logContext,
+) {
+  const normalizedEmail =
+    normalizeEmail(payload.email);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.SERVICE_START,
+    layer: 'service',
+    operation:
+      'VerifyCustomerRegistrationCode',
+    intent:
+      'Validate the customer email code before allowing account creation',
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation:
+      'VerifyCustomerRegistrationCode',
+    intent:
+      'Confirm the verification request still belongs to an available email',
+  });
+
+  await ensureCustomerEmailAvailable(
+    normalizedEmail,
+  );
+
+  const verification =
+    await CustomerRegistrationVerification.findOne(
+      {
+        email: normalizedEmail,
+        purpose:
+          CUSTOMER_REGISTRATION_PURPOSE,
+      },
+    );
+
+  if (
+    !verification ||
+    verification.expiresAt <=
+      new Date()
+  ) {
+    throw new AppError({
+      message:
+        'This verification code has expired',
+      statusCode: 400,
+      classification:
+        ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode:
+        'CUSTOMER_REGISTER_CODE_EXPIRED',
+      resolutionHint:
+        'Request a new verification code and try again',
+      step: LOG_STEPS.DB_QUERY_FAIL,
+    });
+  }
+
+  if (
+    verification.codeHash !==
+    hashValue(payload.code)
+  ) {
+    throw new AppError({
+      message:
+        'The verification code is not correct',
+      statusCode: 400,
+      classification:
+        ERROR_CLASSIFICATIONS.INVALID_INPUT,
+      errorCode:
+        'CUSTOMER_REGISTER_CODE_INVALID',
+      resolutionHint:
+        'Check the latest code from your email and try again',
+      step: LOG_STEPS.SERVICE_FAIL,
+    });
+  }
+
+  verification.verifiedAt =
+    new Date();
+  await verification.save();
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation:
+      'VerifyCustomerRegistrationCode',
+    intent:
+      'Confirm the customer email is verified for the upcoming account creation',
+  });
+
+  return {
+    message:
+      'Email verified successfully',
+    verificationToken:
+      createCustomerRegistrationVerificationToken(
+        verification,
+      ),
+  };
+}
+
+async function loadVerifiedCustomerRegistration(
+  email,
+  verificationToken,
+) {
+  const verificationPayload =
+    verifyCustomerRegistrationVerificationToken(
+      verificationToken,
+    );
+
+  if (
+    verificationPayload.tokenType !==
+      'customer_registration_verification' ||
+    verificationPayload.purpose !==
+      CUSTOMER_REGISTRATION_PURPOSE ||
+    normalizeEmail(
+      verificationPayload.email,
+    ) !== email
+  ) {
+    throw new AppError({
+      message:
+        'Your email verification is not valid for this registration',
+      statusCode: 401,
+      classification:
+        ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode:
+        'CUSTOMER_REGISTER_VERIFICATION_MISMATCH',
+      resolutionHint:
+        'Verify this email address again and try once more',
+      step: LOG_STEPS.AUTH_FAIL,
+    });
+  }
+
+  const verification =
+    await CustomerRegistrationVerification.findOne(
+      {
+        _id: verificationPayload.verificationId,
+        email,
+        purpose:
+          CUSTOMER_REGISTRATION_PURPOSE,
+      },
+    );
+
+  if (
+    !verification ||
+    !verification.verifiedAt ||
+    verification.expiresAt <=
+      new Date()
+  ) {
+    throw new AppError({
+      message:
+        'Your email verification has expired',
+      statusCode: 401,
+      classification:
+        ERROR_CLASSIFICATIONS.AUTHENTICATION_ERROR,
+      errorCode:
+        'CUSTOMER_REGISTER_VERIFICATION_EXPIRED',
+      resolutionHint:
+        'Request a new verification code and try again',
+      step: LOG_STEPS.AUTH_FAIL,
+    });
+  }
+
+  return verification;
+}
 
 function resolveDemoPassword(
   role,
@@ -60,7 +430,7 @@ function resolveDemoPassword(
 
   if (
     role === USER_ROLES.STAFF &&
-    /^staff\d+@adams\.local$/.test(
+    /^(care|staff)\d+@adams\.local$/.test(
       normalizedEmail,
     )
   ) {
@@ -92,6 +462,9 @@ async function registerCustomer(
   meta,
   logContext,
 ) {
+  const normalizedEmail =
+    normalizeEmail(payload.email);
+
   logInfo({
     ...logContext,
     step: LOG_STEPS.SERVICE_START,
@@ -113,22 +486,21 @@ async function registerCustomer(
 
   const existingUser =
     await User.findOne({
-      email:
-        payload.email.toLowerCase(),
+      email: normalizedEmail,
     });
 
   // WHY: Stop here so the UI gets a clear account-exists answer before any password work happens.
   if (existingUser) {
     throw new AppError({
       message:
-        "An account with this email already exists",
+        "This email already has an account. Please log in instead.",
       statusCode: 409,
       classification:
         ERROR_CLASSIFICATIONS.INVALID_INPUT,
       errorCode:
         "CUSTOMER_REGISTER_EMAIL_TAKEN",
       resolutionHint:
-        "Log in instead or use a different email address",
+        "Log in instead or reset the password for the existing account",
       step: LOG_STEPS.DB_QUERY_FAIL,
     });
   }
@@ -140,6 +512,30 @@ async function registerCustomer(
     operation: "RegisterCustomer",
     intent:
       "Confirm the new customer email is available",
+  });
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_START,
+    layer: 'service',
+    operation: 'RegisterCustomer',
+    intent:
+      'Load the verified registration record before creating the customer account',
+  });
+
+  const verification =
+    await loadVerifiedCustomerRegistration(
+      normalizedEmail,
+      payload.verificationToken,
+    );
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.DB_QUERY_OK,
+    layer: 'service',
+    operation: 'RegisterCustomer',
+    intent:
+      'Confirm the customer email was verified before account creation',
   });
 
   // WHY: Hash the password only after uniqueness passes so rejected sign-ups do not waste crypto work.
@@ -162,12 +558,16 @@ async function registerCustomer(
   const user = await User.create({
     firstName: payload.firstName,
     lastName: payload.lastName,
-    email: payload.email.toLowerCase(),
+    email: normalizedEmail,
     phone: payload.phone || "",
     role: USER_ROLES.CUSTOMER,
     status: USER_STATUSES.ACTIVE,
     passwordHash,
   });
+
+  await CustomerRegistrationVerification.deleteOne(
+    { _id: verification._id },
+  );
 
   logInfo({
     ...logContext,
@@ -516,36 +916,34 @@ async function getDemoAccounts(
       "Confirm the role-specific users are ready for quick-fill response shaping",
   });
 
-  // WHY: Only expose accounts that have a known safe quick-fill password in this environment so the UI never advertises unusable shortcuts.
-  const accounts = users
-    .map((user) => {
-      const quickFillPassword =
-        resolveDemoPassword(
-          role,
-          user.email,
-        );
+  const isProduction =
+    process.env.NODE_ENV ===
+    "production";
 
-      if (!quickFillPassword) {
-        return null;
-      }
-
-      return {
+  // WHY: Keep the public demo-account endpoint safe in production, but expose every active local/dev account so the login shortcuts stay in sync with the database.
+  const accounts = isProduction
+    ? []
+    : users.map((user) => ({
         id: String(user._id),
         fullName:
           `${user.firstName} ${user.lastName}`.trim(),
         email: user.email,
-        quickFillPassword,
-      };
-    })
-    .filter(Boolean);
+        role: user.role,
+        staffType:
+          user.staffType || null,
+        quickFillPassword:
+          resolveDemoPassword(
+            role,
+            user.email,
+          ),
+      }));
 
   return {
     message:
       "Demo accounts fetched successfully",
     role,
     passwordAutofillEnabled:
-      process.env.NODE_ENV !==
-      "production",
+      !isProduction,
     accounts,
   };
 }
@@ -557,4 +955,6 @@ module.exports = {
   logoutUser,
   refreshAuth,
   registerCustomer,
+  requestCustomerRegistrationCode,
+  verifyCustomerRegistrationCode,
 };

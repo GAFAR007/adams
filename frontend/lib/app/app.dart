@@ -23,7 +23,13 @@ class _AdamsAppState extends ConsumerState<AdamsApp> {
     super.initState();
 
     // Bootstrapping once here keeps routing decisions consistent across refreshes and deep links.
-    Future<void>.microtask(() => ref.read(authControllerProvider.notifier).bootstrapSession());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      ref.read(authControllerProvider.notifier).bootstrapSession();
+    });
   }
 
   @override

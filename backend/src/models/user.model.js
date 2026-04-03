@@ -6,7 +6,12 @@
 
 const mongoose = require('mongoose');
 
-const { STAFF_AVAILABILITIES, USER_ROLES, USER_STATUSES } = require('../constants/app.constants');
+const {
+  STAFF_AVAILABILITIES,
+  STAFF_TYPES,
+  USER_ROLES,
+  USER_STATUSES,
+} = require('../constants/app.constants');
 
 const userSchema = new mongoose.Schema(
   {
@@ -51,6 +56,12 @@ const userSchema = new mongoose.Schema(
       enum: Object.values(STAFF_AVAILABILITIES),
       default: STAFF_AVAILABILITIES.OFFLINE,
     },
+    staffType: {
+      // WHY: The workflow distinguishes customer care, technicians, and contractors even when auth still groups them under shared roles.
+      type: String,
+      enum: Object.values(STAFF_TYPES),
+      default: null,
+    },
     passwordHash: {
       // WHY: Keep hashes hidden from normal queries so serializers and controllers cannot leak them by accident.
       type: String,
@@ -64,6 +75,7 @@ const userSchema = new mongoose.Schema(
 
 // The compound role/status index supports dashboard and permission-oriented staff lookups.
 userSchema.index({ role: 1, status: 1 });
+userSchema.index({ role: 1, staffType: 1, status: 1 });
 
 const User = mongoose.model('User', userSchema);
 

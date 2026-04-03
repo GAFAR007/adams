@@ -46,6 +46,46 @@ const registerCustomerController = asyncHandler(async (req, res) => {
   });
 });
 
+const requestCustomerRegistrationCodeController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'RequestCustomerRegistrationCode',
+    intent: 'Send a customer registration verification code before account creation',
+  });
+
+  const result = await authService.requestCustomerRegistrationCode(
+    req.body,
+    logContext,
+  );
+
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const verifyCustomerRegistrationCodeController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'VerifyCustomerRegistrationCode',
+    intent: 'Verify the customer registration email code before account creation',
+  });
+
+  const result = await authService.verifyCustomerRegistrationCode(
+    req.body,
+    logContext,
+  );
+
+  res.status(200).json(result);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
 const demoAccountsController = asyncHandler(async (req, res) => {
   const logContext = buildRequestLog(req, {
     layer: 'controller',
@@ -157,4 +197,6 @@ module.exports = {
   meController,
   refreshController,
   registerCustomerController,
+  requestCustomerRegistrationCodeController,
+  verifyCustomerRegistrationCodeController,
 };

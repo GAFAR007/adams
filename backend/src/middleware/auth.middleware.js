@@ -4,15 +4,10 @@
  * HOW: Verify bearer tokens, attach the authenticated user context, and guard allowed roles.
  */
 
-const jwt = require("jsonwebtoken");
-
 const {
   ERROR_CLASSIFICATIONS,
   LOG_STEPS,
 } = require("../constants/app.constants");
-const {
-  env,
-} = require("../config/env");
 const {
   AppError,
 } = require("../utils/app-error");
@@ -20,6 +15,9 @@ const {
   buildRequestLog,
   logInfo,
 } = require("../utils/logger");
+const {
+  verifyAccessToken,
+} = require("../services/token.service");
 
 function requireAuth(req, res, next) {
   void res;
@@ -47,10 +45,7 @@ function requireAuth(req, res, next) {
 
   try {
     // WHY: Verify the signed access token before trusting any user or role claims from the request.
-    const payload = jwt.verify(
-      token,
-      env.jwtAccessSecret,
-    );
+    const payload = verifyAccessToken(token);
 
     // WHY: Store only the minimum trusted auth context needed by downstream guards and services.
     req.authUser = {
@@ -72,7 +67,10 @@ function requireAuth(req, res, next) {
 
     next();
   } catch (error) {
-    // WHY: Convert token verification failures into the shared safe auth error contract.
+    if (error instanceof AppError) {
+      throw error;
+    }
+
     throw new AppError({
       message: "Authentication failed",
       statusCode: 401,

@@ -3,11 +3,32 @@
 /// HOW: Fetch compact summary endpoints, load the queue with backend filters, and expose small admin actions.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/dashboard_models.dart';
 import '../../../core/models/service_request_model.dart';
 import '../../../core/network/api_client.dart';
+
+Map<String, dynamic> _compactJson(Map<String, dynamic> values) {
+  return Map<String, dynamic>.fromEntries(
+    values.entries
+        .where((entry) => entry.value != null)
+        .map(
+          (entry) =>
+              MapEntry<String, dynamic>(entry.key, entry.value as dynamic),
+        ),
+  );
+}
+
+String? _normalizedOptionalString(String? value) {
+  if (value == null) {
+    return null;
+  }
+
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
 
 final adminRepositoryProvider = Provider<AdminRepository>((ref) {
   return AdminRepository(ref.read(apiClientProvider));
@@ -17,6 +38,40 @@ class AdminRepository {
   const AdminRepository(this._client);
 
   final ApiClient _client;
+
+  String _normalizedUploadMimeType(String fileName, String mimeType) {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.isNotEmpty &&
+        normalizedMimeType != 'application/octet-stream') {
+      return normalizedMimeType;
+    }
+
+    final lowerCaseFileName = fileName.toLowerCase();
+    if (lowerCaseFileName.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lowerCaseFileName.endsWith('.jpg') ||
+        lowerCaseFileName.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (lowerCaseFileName.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lowerCaseFileName.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (lowerCaseFileName.endsWith('.txt')) {
+      return 'text/plain';
+    }
+    if (lowerCaseFileName.endsWith('.doc')) {
+      return 'application/msword';
+    }
+    if (lowerCaseFileName.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+
+    return 'application/octet-stream';
+  }
 
   Future<AdminDashboardBundle> fetchDashboardBundle() async {
     // WHY: Keep the summary bundle focused on KPI, staffing, and invite data so queue filtering can refetch independently.
@@ -68,6 +123,21 @@ class AdminRepository {
         .toList();
   }
 
+  Future<List<ServiceRequestModel>> fetchCalendarRequests({
+    required String start,
+    required String end,
+  }) async {
+    final response = await _client.getJson(
+      '/admin/calendar',
+      queryParameters: <String, dynamic>{'start': start, 'end': end},
+    );
+
+    return (response['requests'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map(ServiceRequestModel.fromJson)
+        .toList();
+  }
+
   Future<void> assignRequest({
     required String requestId,
     required String staffId,
@@ -78,10 +148,69 @@ class AdminRepository {
     );
   }
 
+  Future<void> deliverRequest({required String requestId}) async {
+    await _client.patchJson('/admin/requests/$requestId/deliver');
+  }
+
+  Future<void> sendMessage({
+    required String requestId,
+    required String message,
+    String? actionType,
+  }) async {
+    await _client.postJson(
+      '/admin/requests/$requestId/messages',
+      data: <String, dynamic>{'message': message, 'actionType': actionType},
+    );
+  }
+
+  Future<void> selectEstimation({
+    required String requestId,
+    required String estimationId,
+  }) async {
+    await _client.patchJson(
+      '/admin/requests/$requestId/estimations/select',
+      data: <String, dynamic>{'estimationId': estimationId},
+    );
+  }
+
+  Future<void> uploadRequestAttachment({
+    required String requestId,
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+    String? caption,
+  }) async {
+    final resolvedMimeType = _normalizedUploadMimeType(fileName, mimeType);
+
+    await _client.postFormData(
+      '/admin/requests/$requestId/messages/attachment',
+      createData: () => FormData.fromMap(<String, dynamic>{
+        'attachment': MultipartFile.fromBytes(
+          bytes,
+          filename: fileName,
+          contentType: DioMediaType.parse(resolvedMimeType),
+        ),
+        if (caption != null && caption.trim().isNotEmpty)
+          'caption': caption.trim(),
+      }),
+    );
+  }
+
   Future<void> sendInvoice({
     required String requestId,
-    required double amount,
+    required double adminServiceChargePercent,
     required String dueDate,
+    String? reviewKind,
+    String? siteReviewDate,
+    String? siteReviewStartTime,
+    String? siteReviewEndTime,
+    String? siteReviewNotes,
+    String? plannedStartDate,
+    String? plannedStartTime,
+    String? plannedEndTime,
+    double? plannedHoursPerDay,
+    String? plannedExpectedEndDate,
+    List<Map<String, dynamic>>? plannedDailySchedule,
     required String paymentMethod,
     required String paymentInstructions,
     String? note,
@@ -89,8 +218,23 @@ class AdminRepository {
     await _client.postJson(
       '/admin/requests/$requestId/invoice',
       data: <String, dynamic>{
-        'amount': amount,
+        'adminServiceChargePercent': adminServiceChargePercent,
         'dueDate': dueDate,
+        ..._compactJson(<String, dynamic>{
+          'reviewKind': _normalizedOptionalString(reviewKind),
+          'siteReviewDate': _normalizedOptionalString(siteReviewDate),
+          'siteReviewStartTime': _normalizedOptionalString(siteReviewStartTime),
+          'siteReviewEndTime': _normalizedOptionalString(siteReviewEndTime),
+          'siteReviewNotes': siteReviewNotes,
+          'plannedStartDate': _normalizedOptionalString(plannedStartDate),
+          'plannedStartTime': _normalizedOptionalString(plannedStartTime),
+          'plannedEndTime': _normalizedOptionalString(plannedEndTime),
+          'plannedHoursPerDay': plannedHoursPerDay,
+          'plannedExpectedEndDate': _normalizedOptionalString(
+            plannedExpectedEndDate,
+          ),
+          'plannedDailySchedule': plannedDailySchedule,
+        }),
         'paymentMethod': paymentMethod,
         'paymentInstructions': paymentInstructions,
         'note': note,
@@ -114,6 +258,7 @@ class AdminRepository {
     required String lastName,
     required String email,
     required String phone,
+    required String staffType,
   }) async {
     await _client.postJson(
       '/admin/staff/invites',
@@ -122,6 +267,7 @@ class AdminRepository {
         'lastName': lastName,
         'email': email,
         'phone': phone,
+        'staffType': staffType,
       },
     );
   }

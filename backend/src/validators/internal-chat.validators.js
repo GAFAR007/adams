@@ -39,6 +39,27 @@ const postInternalChatMessageValidator = [
     .withMessage('Message must be between 1 and 2000 characters'),
 ];
 
+const uploadInternalChatAttachmentValidator = [
+  param('threadId').isMongoId().withMessage('Thread ID must be valid'),
+  body('caption')
+    .optional()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Caption must be 2000 characters or fewer'),
+];
+
+const suggestInternalChatReplyValidator = [
+  param('threadId').isMongoId().withMessage('Thread ID must be valid'),
+  body('draft')
+    .optional()
+    .isString()
+    .withMessage('Draft must be text')
+    .bail()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Draft must be 2000 characters or fewer'),
+];
+
 const markInternalChatReadValidator = [
   param('threadId').isMongoId().withMessage('Thread ID must be valid'),
 ];
@@ -48,4 +69,6 @@ module.exports = {
   createGroupInternalChatValidator,
   markInternalChatReadValidator,
   postInternalChatMessageValidator,
+  suggestInternalChatReplyValidator,
+  uploadInternalChatAttachmentValidator,
 };

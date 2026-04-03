@@ -4,12 +4,15 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/core/models/service_request_model.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
+import '../../core/i18n/app_language.dart';
+import '../utils/request_attachment_flow_labels.dart';
 import '../utils/external_url_opener.dart';
 
-class RequestThreadSection extends StatelessWidget {
+class RequestThreadSection extends ConsumerStatefulWidget {
   const RequestThreadSection({
     super.key,
     required this.messages,
@@ -26,28 +29,38 @@ class RequestThreadSection extends StatelessWidget {
   final Widget? Function(RequestMessageModel message)? messageActionBuilder;
 
   @override
+  ConsumerState<RequestThreadSection> createState() =>
+      _RequestThreadSectionState();
+}
+
+class _RequestThreadSectionState extends ConsumerState<RequestThreadSection> {
+  bool _isAttachmentGalleryVisible = true;
+
+  @override
   Widget build(BuildContext context) {
-    if (messages.isEmpty) {
+    final language = ref.watch(appLanguageProvider);
+
+    if (widget.messages.isEmpty) {
       return Align(
         alignment: Alignment.center,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: dark
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.white.withValues(alpha: 0.78),
+            color: widget.dark
+                ? AppTheme.darkSurfaceMuted
+                : AppTheme.shell.withValues(alpha: 0.84),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: dark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : AppTheme.clay.withValues(alpha: 0.28),
+              color: widget.dark
+                  ? AppTheme.darkBorder
+                  : AppTheme.border.withValues(alpha: 0.5),
             ),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Text(
-              emptyLabel,
+              widget.emptyLabel,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: dark ? Colors.white.withValues(alpha: 0.76) : null,
+                color: widget.dark ? AppTheme.darkTextMuted : null,
               ),
               textAlign: TextAlign.center,
             ),
@@ -56,21 +69,76 @@ class RequestThreadSection extends StatelessWidget {
       );
     }
 
+    final attachmentEntries = widget.messages
+        .where((RequestMessageModel message) => message.attachment != null)
+        .map(
+          (RequestMessageModel message) => _ThreadAttachmentEntry(
+            message: message,
+            attachment: message.attachment!,
+          ),
+        )
+        .toList(growable: false);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: messages.map((RequestMessageModel message) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _RequestMessageBubble(
-            message: message,
-            viewerRole: viewerRole,
-            dark: dark,
-            messageActionBuilder: messageActionBuilder,
-          ),
-        );
-      }).toList(),
+      children: <Widget>[
+        ...widget.messages.map((RequestMessageModel message) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _RequestMessageBubble(
+              message: message,
+              viewerRole: widget.viewerRole,
+              dark: widget.dark,
+              language: language,
+              messageActionBuilder: widget.messageActionBuilder,
+            ),
+          );
+        }),
+        if (attachmentEntries.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          if (_isAttachmentGalleryVisible)
+            _RequestAttachmentGallery(
+              entries: attachmentEntries,
+              dark: widget.dark,
+              language: language,
+              onDismiss: () {
+                setState(() {
+                  _isAttachmentGalleryVisible = false;
+                });
+              },
+            )
+          else
+            _RequestAttachmentGalleryToggle(
+              attachmentCount: attachmentEntries.length,
+              dark: widget.dark,
+              language: language,
+              onPressed: () {
+                setState(() {
+                  _isAttachmentGalleryVisible = true;
+                });
+              },
+            ),
+        ],
+      ],
     );
   }
+}
+
+class _ThreadAttachmentEntry {
+  const _ThreadAttachmentEntry({
+    required this.message,
+    required this.attachment,
+  });
+
+  final RequestMessageModel message;
+  final RequestMessageAttachmentModel attachment;
+}
+
+class _ThreadAttachmentGroup {
+  const _ThreadAttachmentGroup({required this.stage, required this.entries});
+
+  final String stage;
+  final List<_ThreadAttachmentEntry> entries;
 }
 
 class _RequestMessageBubble extends StatelessWidget {
@@ -78,12 +146,14 @@ class _RequestMessageBubble extends StatelessWidget {
     required this.message,
     required this.viewerRole,
     required this.dark,
+    required this.language,
     required this.messageActionBuilder,
   });
 
   final RequestMessageModel message;
   final String viewerRole;
   final bool dark;
+  final AppLanguage language;
   final Widget? Function(RequestMessageModel message)? messageActionBuilder;
 
   bool get _isOwnMessage {
@@ -105,7 +175,12 @@ class _RequestMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (message.isAi || message.isSystem) {
-      return _RequestThreadNote(message: message, dark: dark);
+      return _RequestThreadNote(
+        message: message,
+        dark: dark,
+        language: language,
+        action: messageActionBuilder?.call(message),
+      );
     }
 
     final ownBubbleColor = switch (viewerRole) {
@@ -115,10 +190,10 @@ class _RequestMessageBubble extends StatelessWidget {
     };
     final incomingAccentColor = _incomingAccentFor(message);
     final bubbleColor = dark
-        ? (_isOwnMessage ? ownBubbleColor : const Color(0xFF15171A))
+        ? (_isOwnMessage ? ownBubbleColor : AppTheme.darkSurface)
         : _isOwnMessage
         ? ownBubbleColor
-        : Colors.white.withValues(alpha: 0.92);
+        : AppTheme.shell.withValues(alpha: 0.94);
     final foregroundColor = dark
         ? Colors.white
         : _isOwnMessage
@@ -140,16 +215,16 @@ class _RequestMessageBubble extends StatelessWidget {
     final action = messageActionBuilder?.call(message);
     final hasVisibleBodyText = _hasVisibleBodyText(message);
     final senderLabel = _isOwnMessage
-        ? 'You'
+        ? language.pick(en: 'You', de: 'Sie')
         : message.senderName.isNotEmpty
         ? message.senderName
         : message.isCustomer
-        ? 'Customer'
+        ? language.pick(en: 'Customer', de: 'Kunde')
         : message.isStaff
-        ? 'Staff'
+        ? language.pick(en: 'Staff', de: 'Mitarbeiter')
         : message.isAdmin
-        ? 'Admin'
-        : 'Message';
+        ? language.pick(en: 'Admin', de: 'Admin')
+        : language.pick(en: 'Message', de: 'Nachricht');
     final footerColor = dark
         ? (_isOwnMessage
               ? Colors.white.withValues(alpha: 0.82)
@@ -239,12 +314,18 @@ class _RequestMessageBubble extends StatelessWidget {
                 ],
                 if (message.attachment != null) ...<Widget>[
                   _RequestAttachmentTile(
+                    message: message,
                     attachment: message.attachment!,
                     foregroundColor: foregroundColor,
                     accentColor: dark ? incomingAccentColor : ownBubbleColor,
                     isOwnMessage: _isOwnMessage,
                     dark: dark,
+                    language: language,
                   ),
+                  if (action != null) ...<Widget>[
+                    const SizedBox(height: 10),
+                    action,
+                  ],
                   if (hasVisibleBodyText) const SizedBox(height: 10),
                 ],
                 if (hasVisibleBodyText)
@@ -255,7 +336,7 @@ class _RequestMessageBubble extends StatelessWidget {
                       height: 1.32,
                     ),
                   ),
-                if (action != null) ...<Widget>[
+                if (action != null && message.attachment == null) ...<Widget>[
                   const SizedBox(height: 12),
                   action,
                 ],
@@ -283,22 +364,30 @@ class _RequestMessageBubble extends StatelessWidget {
 
 class _RequestAttachmentTile extends StatelessWidget {
   const _RequestAttachmentTile({
+    required this.message,
     required this.attachment,
     required this.foregroundColor,
     required this.accentColor,
     required this.isOwnMessage,
     required this.dark,
+    required this.language,
   });
 
+  final RequestMessageModel message;
   final RequestMessageAttachmentModel attachment;
   final Color foregroundColor;
   final Color accentColor;
   final bool isOwnMessage;
   final bool dark;
+  final AppLanguage language;
 
   @override
   Widget build(BuildContext context) {
     final fileUrl = attachment.fileUrl;
+    final displayName = requestAttachmentDisplayNameForMessage(
+      message,
+      language: language,
+    );
     final tileColor = dark
         ? (isOwnMessage
               ? Colors.white.withValues(alpha: 0.1)
@@ -327,8 +416,13 @@ class _RequestAttachmentTile extends StatelessWidget {
                 }
 
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Opening attachments is not supported here'),
+                  SnackBar(
+                    content: Text(
+                      language.pick(
+                        en: 'Opening attachments is not supported here',
+                        de: 'Anhänge können hier nicht geöffnet werden',
+                      ),
+                    ),
                   ),
                 );
               },
@@ -364,7 +458,7 @@ class _RequestAttachmentTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        attachment.originalName,
+                        displayName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -399,11 +493,534 @@ class _RequestAttachmentTile extends StatelessWidget {
   }
 }
 
+class _RequestAttachmentGallery extends StatelessWidget {
+  const _RequestAttachmentGallery({
+    required this.entries,
+    required this.dark,
+    required this.language,
+    required this.onDismiss,
+  });
+
+  final List<_ThreadAttachmentEntry> entries;
+  final bool dark;
+  final AppLanguage language;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = _groupAttachmentEntries(entries);
+    final titleColor = dark ? Colors.white : AppTheme.ink;
+    final subtitleColor = dark
+        ? Colors.white.withValues(alpha: 0.68)
+        : AppTheme.ink.withValues(alpha: 0.62);
+    final cardColor = dark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.white.withValues(alpha: 0.88);
+    final borderColor = dark
+        ? Colors.white.withValues(alpha: 0.08)
+        : AppTheme.clay.withValues(alpha: 0.26);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.perm_media_rounded, size: 16, color: titleColor),
+                const SizedBox(width: 8),
+                Text(
+                  language.pick(en: 'Request uploads', de: 'Anfrage-Uploads'),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: titleColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : AppTheme.cobalt.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    child: Text(
+                      '${entries.length}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: dark ? Colors.white : AppTheme.cobalt,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: onDismiss,
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: subtitleColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              language.pick(
+                en: 'Uploads stay grouped here by workflow stage: request, site review, invoice, and proof.',
+                de: 'Uploads bleiben hier nach Ablaufstufe gruppiert: Anfrage, Vor-Ort-Termin, Rechnung und Nachweis.',
+              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: subtitleColor,
+                height: 1.35,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 10),
+            ...groups.asMap().entries.map((groupEntry) {
+              final group = groupEntry.value;
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: groupEntry.key == groups.length - 1 ? 0 : 12,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          requestAttachmentStageLabel(
+                            group.stage,
+                            language: language,
+                          ),
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(
+                                color: titleColor,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(width: 8),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: dark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : AppTheme.ink.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            child: Text(
+                              '${group.entries.length}',
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: subtitleColor,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 108,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: group.entries.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (BuildContext context, int index) {
+                          final entry = group.entries[index];
+                          return _RequestAttachmentGalleryCard(
+                            entry: entry,
+                            dark: dark,
+                            language: language,
+                            categoryIndex: index + 1,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestAttachmentGalleryToggle extends StatelessWidget {
+  const _RequestAttachmentGalleryToggle({
+    required this.attachmentCount,
+    required this.dark,
+    required this.language,
+    required this.onPressed,
+  });
+
+  final int attachmentCount;
+  final bool dark;
+  final AppLanguage language;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          foregroundColor: dark ? Colors.white : AppTheme.cobalt,
+          backgroundColor: dark
+              ? Colors.white.withValues(alpha: 0.08)
+              : AppTheme.cobalt.withValues(alpha: 0.08),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+            side: BorderSide(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : AppTheme.cobalt.withValues(alpha: 0.18),
+            ),
+          ),
+        ),
+        icon: const Icon(Icons.perm_media_rounded, size: 16),
+        label: Text(
+          language.pick(
+            en: 'Show uploads ($attachmentCount)',
+            de: 'Uploads zeigen ($attachmentCount)',
+          ),
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: dark ? Colors.white : AppTheme.cobalt,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestAttachmentGalleryCard extends StatelessWidget {
+  const _RequestAttachmentGalleryCard({
+    required this.entry,
+    required this.dark,
+    required this.language,
+    required this.categoryIndex,
+  });
+
+  final _ThreadAttachmentEntry entry;
+  final bool dark;
+  final AppLanguage language;
+  final int categoryIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final attachment = entry.attachment;
+    final fileUrl = attachment.fileUrl;
+    final displayName = requestAttachmentDisplayNameForMessage(
+      entry.message,
+      language: language,
+      categoryIndex: categoryIndex,
+    );
+    final senderName = entry.message.senderName.trim().isNotEmpty
+        ? entry.message.senderName.trim()
+        : entry.message.isCustomer
+        ? language.pick(en: 'Customer', de: 'Kunde')
+        : entry.message.isStaff
+        ? language.pick(en: 'Staff', de: 'Mitarbeiter')
+        : entry.message.isAdmin
+        ? language.pick(en: 'Admin', de: 'Admin')
+        : language.pick(en: 'Attachment', de: 'Anhang');
+    final accentColor = _incomingAccentFor(entry.message);
+    final baseColor = dark ? const Color(0xFF121417) : Colors.white;
+    final footerColor = dark
+        ? Colors.white.withValues(alpha: 0.68)
+        : AppTheme.ink.withValues(alpha: 0.66);
+
+    Future<void> handleOpen() async {
+      if (fileUrl == null) {
+        return;
+      }
+
+      final opened = await openExternalUrl(fileUrl);
+      if (!context.mounted || opened) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            language.pick(
+              en: 'Opening attachments is not supported here',
+              de: 'Anhänge können hier nicht geöffnet werden',
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: 136,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: fileUrl == null ? null : handleOpen,
+          child: Ink(
+            decoration: BoxDecoration(
+              color: baseColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : AppTheme.clay.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16),
+                    ),
+                    child: _RequestAttachmentGalleryPreview(
+                      attachment: attachment,
+                      accentColor: accentColor,
+                      dark: dark,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(9, 7, 9, 7),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: dark ? Colors.white : AppTheme.ink,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$senderName · ${_formatTimestamp(entry.message.createdAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: footerColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+List<_ThreadAttachmentGroup> _groupAttachmentEntries(
+  List<_ThreadAttachmentEntry> entries,
+) {
+  final grouped = <String, List<_ThreadAttachmentEntry>>{};
+  for (final entry in entries) {
+    final category = requestAttachmentCategoryForMessage(entry.message);
+    final stage = requestAttachmentStageForCategory(category);
+    grouped.putIfAbsent(stage, () => <_ThreadAttachmentEntry>[]).add(entry);
+  }
+
+  final categories = grouped.keys.toList()
+    ..sort((left, right) {
+      final leftOrder = requestAttachmentStageOrder(left);
+      final rightOrder = requestAttachmentStageOrder(right);
+      if (leftOrder != rightOrder) {
+        return leftOrder.compareTo(rightOrder);
+      }
+
+      return left.compareTo(right);
+    });
+
+  return categories
+      .map(
+        (stage) => _ThreadAttachmentGroup(
+          stage: stage,
+          entries: grouped[stage] ?? const <_ThreadAttachmentEntry>[],
+        ),
+      )
+      .toList(growable: false);
+}
+
+class _RequestAttachmentGalleryPreview extends StatelessWidget {
+  const _RequestAttachmentGalleryPreview({
+    required this.attachment,
+    required this.accentColor,
+    required this.dark,
+  });
+
+  final RequestMessageAttachmentModel attachment;
+  final Color accentColor;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final fileUrl = attachment.fileUrl;
+    if (_isImageAttachment(attachment.mimeType) && fileUrl != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          Image.network(
+            fileUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _AttachmentPreviewFallback(
+              attachment: attachment,
+              accentColor: accentColor,
+              dark: dark,
+            ),
+            loadingBuilder:
+                (
+                  BuildContext context,
+                  Widget child,
+                  ImageChunkEvent? loadingProgress,
+                ) {
+                  if (loadingProgress == null) {
+                    return child;
+                  }
+
+                  return _AttachmentPreviewFallback(
+                    attachment: attachment,
+                    accentColor: accentColor,
+                    dark: dark,
+                  );
+                },
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.28),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _AttachmentPreviewFallback(
+      attachment: attachment,
+      accentColor: accentColor,
+      dark: dark,
+    );
+  }
+}
+
+class _AttachmentPreviewFallback extends StatelessWidget {
+  const _AttachmentPreviewFallback({
+    required this.attachment,
+    required this.accentColor,
+    required this.dark,
+  });
+
+  final RequestMessageAttachmentModel attachment;
+  final Color accentColor;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: dark
+              ? <Color>[
+                  accentColor.withValues(alpha: 0.18),
+                  Colors.black.withValues(alpha: 0.12),
+                ]
+              : <Color>[accentColor.withValues(alpha: 0.14), Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              _attachmentIconFor(attachment.mimeType),
+              size: 26,
+              color: dark ? Colors.white : accentColor,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _attachmentTypeLabelFor(attachment.mimeType),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: dark ? Colors.white : AppTheme.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _formatBytes(attachment.sizeBytes),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.7)
+                    : AppTheme.ink.withValues(alpha: 0.68),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RequestThreadNote extends StatelessWidget {
-  const _RequestThreadNote({required this.message, required this.dark});
+  const _RequestThreadNote({
+    required this.message,
+    required this.dark,
+    required this.language,
+    required this.action,
+  });
 
   final RequestMessageModel message;
   final bool dark;
+  final AppLanguage language;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -413,7 +1030,11 @@ class _RequestThreadNote extends StatelessWidget {
         ? const Color(0xFFFFF1D6)
         : const Color(0xFFECE6DA);
     final timestampLabel = _formatTimestamp(message.createdAt);
-    final title = message.isAi ? 'AI update' : 'System update';
+    final title = message.isAi
+        ? (message.senderName.trim().isNotEmpty
+              ? message.senderName
+              : language.pick(en: 'Naima AI', de: 'Naima KI'))
+        : language.pick(en: 'System update', de: 'Systemmeldung');
     final icon = message.isAi
         ? Icons.auto_awesome_rounded
         : Icons.info_outline_rounded;
@@ -461,6 +1082,10 @@ class _RequestThreadNote extends StatelessWidget {
                     color: foregroundColor.withValues(alpha: dark ? 0.88 : 1),
                   ),
                 ),
+                if (action != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  action!,
+                ],
                 if (timestampLabel.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 8),
                   Text(
@@ -536,6 +1161,10 @@ IconData _attachmentIconFor(String mimeType) {
   }
 
   return Icons.attach_file_rounded;
+}
+
+bool _isImageAttachment(String mimeType) {
+  return mimeType.startsWith('image/');
 }
 
 String _attachmentTypeLabelFor(String mimeType) {

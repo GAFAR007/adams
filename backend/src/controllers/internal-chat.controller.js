@@ -7,6 +7,7 @@
 const { LOG_STEPS } = require('../constants/app.constants');
 const { asyncHandler } = require('../utils/async-handler');
 const { buildRequestLog, logInfo } = require('../utils/logger');
+const { emitInternalChatThreadUpdated } = require('../realtime/socket');
 const internalChatService = require('../services/internal-chat.service');
 
 const listInternalChatsController = asyncHandler(async (req, res) => {
@@ -42,6 +43,7 @@ const createDirectInternalChatController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -64,6 +66,7 @@ const createGroupInternalChatController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -82,6 +85,51 @@ const postInternalChatMessageController = asyncHandler(async (req, res) => {
     req.authUser,
     req.params.threadId,
     req.body.message,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const uploadInternalChatAttachmentController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'InternalChatUploadAttachment',
+    intent: 'Append an uploaded image or document to an internal chat thread',
+  });
+
+  const result = await internalChatService.uploadInternalChatAttachment(
+    req.authUser,
+    req.params.threadId,
+    req.file,
+    req.body.caption,
+    logContext,
+  );
+  res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
+
+  logInfo({
+    ...logContext,
+    step: LOG_STEPS.CONTROLLER_RESPONSE_OK,
+  });
+});
+
+const suggestInternalChatReplyController = asyncHandler(async (req, res) => {
+  const logContext = buildRequestLog(req, {
+    layer: 'controller',
+    operation: 'InternalChatSuggestReply',
+    intent: 'Generate an AI-assisted internal chat reply suggestion for the current operator',
+  });
+
+  const result = await internalChatService.suggestInternalChatReply(
+    req.authUser,
+    req.params.threadId,
+    req.body.draft,
     logContext,
   );
   res.status(200).json(result);
@@ -105,6 +153,7 @@ const markInternalChatReadController = asyncHandler(async (req, res) => {
     logContext,
   );
   res.status(200).json(result);
+  emitInternalChatThreadUpdated(result.thread);
 
   logInfo({
     ...logContext,
@@ -118,4 +167,6 @@ module.exports = {
   listInternalChatsController,
   markInternalChatReadController,
   postInternalChatMessageController,
+  suggestInternalChatReplyController,
+  uploadInternalChatAttachmentController,
 };

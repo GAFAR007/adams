@@ -14,11 +14,11 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(ref.read(apiClientProvider));
 });
 
-final authDemoAccountsProvider = FutureProvider.family<DemoLoginBundle, String>(
-  (ref, role) async {
-    return ref.watch(authRepositoryProvider).fetchDemoAccounts(role: role);
-  },
-);
+final authDemoAccountsProvider = FutureProvider.autoDispose
+    .family<DemoLoginBundle, String>((ref, role) async {
+      // WHY: Login shortcuts can change after new registrations, so the list should refetch when the screen is reopened.
+      return ref.watch(authRepositoryProvider).fetchDemoAccounts(role: role);
+    });
 
 class AuthRepository {
   const AuthRepository(this._client);
@@ -31,6 +31,7 @@ class AuthRepository {
     required String email,
     required String phone,
     required String password,
+    required String verificationToken,
   }) async {
     final response = await _client.postJson(
       '/auth/customer/register',
@@ -40,10 +41,35 @@ class AuthRepository {
         'email': email,
         'phone': phone,
         'password': password,
+        'verificationToken': verificationToken,
       },
     );
 
     return AuthSession.fromJson(response);
+  }
+
+  Future<void> requestCustomerRegistrationCode({required String email}) async {
+    await _client.postJson(
+      '/auth/customer/register/request-code',
+      data: <String, dynamic>{'email': email},
+    );
+  }
+
+  Future<String> verifyCustomerRegistrationCode({
+    required String email,
+    required String code,
+  }) async {
+    final response = await _client.postJson(
+      '/auth/customer/register/verify-code',
+      data: <String, dynamic>{'email': email, 'code': code},
+    );
+
+    final verificationToken = response['verificationToken'];
+    if (verificationToken is String && verificationToken.isNotEmpty) {
+      return verificationToken;
+    }
+
+    throw const ApiException('Email verification token was missing');
   }
 
   Future<AuthSession> login({

@@ -8,12 +8,16 @@ class DemoLoginAccount {
     required this.id,
     required this.fullName,
     required this.email,
+    required this.role,
+    required this.staffType,
     required this.quickFillPassword,
   });
 
   final String id;
   final String fullName;
   final String email;
+  final String role;
+  final String? staffType;
   final String? quickFillPassword;
 
   factory DemoLoginAccount.fromJson(Map<String, dynamic> json) {
@@ -21,6 +25,8 @@ class DemoLoginAccount {
       id: json['id'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
       email: json['email'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+      staffType: json['staffType'] as String?,
       quickFillPassword: json['quickFillPassword'] as String?,
     );
   }

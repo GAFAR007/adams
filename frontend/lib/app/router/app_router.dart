@@ -11,13 +11,21 @@ import '../features/admin/presentation/admin_dashboard_screen.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/auth/presentation/admin_login_screen.dart';
 import '../features/auth/presentation/customer_login_screen.dart';
-import '../features/auth/presentation/customer_register_screen.dart';
 import '../features/auth/presentation/staff_login_screen.dart';
 import '../features/auth/presentation/staff_register_screen.dart';
 import '../features/customer/presentation/customer_create_request_screen.dart';
+import '../features/customer/presentation/customer_quotation_screen.dart';
 import '../features/customer/presentation/customer_requests_screen.dart';
 import '../features/public/presentation/home_screen.dart';
+import '../features/public/presentation/public_about_screen.dart';
+import '../features/public/presentation/public_booking_chat_screen.dart';
+import '../features/public/presentation/public_contact_screen.dart';
+import '../features/public/presentation/public_legal_screen.dart';
+import '../features/public/presentation/public_service_detail_screen.dart';
+import '../features/public/presentation/public_services_screen.dart';
 import '../features/staff/presentation/staff_dashboard_screen.dart';
+import '../shared/presentation/workspace_calendar_screen.dart';
+import '../shared/presentation/workspace_profile_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authControllerProvider);
@@ -26,14 +34,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     redirect: (BuildContext context, GoRouterState state) {
       final location = state.matchedLocation;
-      final isAdminProtected = location == '/admin';
-      final isStaffProtected = location == '/staff';
+      final isAdminProtected =
+          location == '/admin' || location == '/admin/calendar';
+      final isAdminProfileRoute = location == '/admin/profile';
+      final isStaffProtected =
+          location == '/staff' || location == '/staff/calendar';
+      final isStaffProfileRoute = location == '/staff/profile';
+      final isCustomerProfileRoute = location == '/app/profile';
       final isCustomerProtected =
           location == '/app/requests' ||
+          location == '/app/calendar' ||
+          isCustomerProfileRoute ||
           location == '/app/requests/new' ||
           location.startsWith('/app/requests/');
       final isPublicAuthRoute =
           location == '/login' ||
+          location == '/book-service' ||
           location == '/register' ||
           location == '/admin/login' ||
           location == '/staff/login' ||
@@ -48,10 +64,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (isPublicAuthRoute && authState.isAuthenticated) {
+        if ((location == '/book-service' || location == '/register') &&
+            authState.role == 'customer') {
+          final selectedService = state.uri.queryParameters['service'];
+          if (selectedService != null && selectedService.isNotEmpty) {
+            return '/app/requests/new?service=$selectedService';
+          }
+
+          return '/app/requests/new';
+        }
+
         return _homeForRole(authState.role);
       }
 
-      if (isAdminProtected) {
+      if (isAdminProtected || isAdminProfileRoute) {
         if (!authState.isAuthenticated) {
           return '/admin/login';
         }
@@ -61,7 +87,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         }
       }
 
-      if (isStaffProtected) {
+      if (isStaffProtected || isStaffProfileRoute) {
         if (!authState.isAuthenticated) {
           return '/staff/login';
         }
@@ -91,28 +117,101 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              HomeScreen(
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/about',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              PublicAboutScreen(
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/contact',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              PublicContactScreen(
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/legal',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              PublicLegalScreen(
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/services',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              PublicServicesScreen(
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/services/:serviceKey',
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            _buildPublicTransitionPage(
+              state,
+              PublicServiceDetailScreen(
+                serviceKey: state.pathParameters['serviceKey'] ?? '',
+                initialLanguageCode: state.uri.queryParameters['lang'],
+              ),
+            ),
+      ),
+      GoRoute(
+        path: '/book-service',
         builder: (BuildContext context, GoRouterState state) =>
-            const HomeScreen(),
+            PublicBookingChatScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+              initialServiceKey: state.uri.queryParameters['service'],
+            ),
       ),
       GoRoute(
         path: '/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const CustomerLoginScreen(),
+            CustomerLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/register',
         builder: (BuildContext context, GoRouterState state) =>
-            const CustomerRegisterScreen(),
+            PublicBookingChatScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+              initialServiceKey: state.uri.queryParameters['service'],
+            ),
       ),
       GoRoute(
         path: '/admin/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const AdminLoginScreen(),
+            AdminLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/staff/login',
         builder: (BuildContext context, GoRouterState state) =>
-            const StaffLoginScreen(),
+            StaffLoginScreen(
+              initialLanguageCode: state.uri.queryParameters['lang'],
+            ),
       ),
       GoRoute(
         path: '/staff/register/:token',
@@ -127,9 +226,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             const CustomerRequestsScreen(),
       ),
       GoRoute(
+        path: '/app/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.customer),
+      ),
+      GoRoute(
+        path: '/app/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(
+              scope: WorkspaceCalendarScope.customer,
+            ),
+      ),
+      GoRoute(
         path: '/app/requests/new',
         builder: (BuildContext context, GoRouterState state) =>
-            const CustomerCreateRequestScreen(),
+            CustomerCreateRequestScreen(
+              initialServiceType: state.uri.queryParameters['service'],
+            ),
       ),
       GoRoute(
         path: '/app/requests/:requestId/edit',
@@ -139,14 +252,41 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ),
       ),
       GoRoute(
+        path: '/app/requests/:requestId/quotation',
+        builder: (BuildContext context, GoRouterState state) =>
+            CustomerQuotationScreen(
+              requestId: state.pathParameters['requestId'] ?? '',
+            ),
+      ),
+      GoRoute(
         path: '/admin',
         builder: (BuildContext context, GoRouterState state) =>
             const AdminDashboardScreen(),
       ),
       GoRoute(
+        path: '/admin/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.admin),
+      ),
+      GoRoute(
+        path: '/admin/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(scope: WorkspaceCalendarScope.admin),
+      ),
+      GoRoute(
         path: '/staff',
         builder: (BuildContext context, GoRouterState state) =>
             const StaffDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/staff/profile',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceProfileScreen(scope: WorkspaceProfileScope.staff),
+      ),
+      GoRoute(
+        path: '/staff/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const WorkspaceCalendarScreen(scope: WorkspaceCalendarScope.staff),
       ),
     ],
   );
@@ -159,6 +299,34 @@ String _homeForRole(String role) {
     'customer' => '/app/requests',
     _ => '/',
   };
+}
+
+CustomTransitionPage<void> _buildPublicTransitionPage(
+  GoRouterState state,
+  Widget child,
+) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: const Duration(milliseconds: 360),
+    reverseTransitionDuration: const Duration(milliseconds: 260),
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final offset = Tween<Offset>(
+        begin: const Offset(0.02, 0.015),
+        end: Offset.zero,
+      ).animate(curved);
+
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(position: offset, child: child),
+      );
+    },
+  );
 }
 
 class _StartupScreen extends StatelessWidget {

@@ -16,6 +16,9 @@ const {
   createCustomerRouter,
 } = require("./customer.routes");
 const {
+  createPublicRouter,
+} = require("./public.routes");
+const {
   createStaffRouter,
 } = require("./staff.routes");
 
@@ -31,6 +34,10 @@ function createApiRouter() {
       });
   });
 
+  router.use(
+    "/public",
+    createPublicRouter(),
+  );
   router.use(
     "/auth",
     createAuthRouter(),

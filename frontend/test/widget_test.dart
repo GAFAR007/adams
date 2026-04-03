@@ -9,10 +9,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/app.dart';
 
 void main() {
-  testWidgets('renders landing page headline', (WidgetTester tester) async {
+  testWidgets('renders homepage fallback when backend data is unavailable', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const ProviderScope(child: AdamsApp()));
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
-    expect(find.textContaining('Cleaner service requests'), findsOneWidget);
+    expect(find.text('Unable to load company profile'), findsOneWidget);
   });
 }
