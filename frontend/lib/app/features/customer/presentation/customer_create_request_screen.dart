@@ -41,7 +41,6 @@ class CustomerCreateRequestScreen extends ConsumerStatefulWidget {
 
 class _CustomerCreateRequestScreenState
     extends ConsumerState<CustomerCreateRequestScreen> {
-  static const int _minimumRequestPhotos = 5;
   static const int _maximumRequestPhotos = 12;
   static const int _maximumRequestVideos = 2;
 
@@ -211,9 +210,6 @@ class _CustomerCreateRequestScreenState
 
   bool get _requiresEnhancedIntake => !_isEditing;
 
-  bool get _hasRequiredIntakeMedia =>
-      _pendingIntakePhotos.length >= _minimumRequestPhotos;
-
   List<PickedRequestAttachmentFile> get _pendingIntakeMediaFiles =>
       <PickedRequestAttachmentFile>[
         ..._pendingIntakePhotos,
@@ -313,10 +309,6 @@ class _CustomerCreateRequestScreenState
 
     if (_messageController.text.trim().isEmpty) {
       return _RequestConversationStep.message;
-    }
-
-    if (_requiresEnhancedIntake && !_hasRequiredIntakeMedia) {
-      return _RequestConversationStep.intakeMedia;
     }
 
     return _RequestConversationStep.done;
@@ -567,8 +559,8 @@ class _CustomerCreateRequestScreenState
         ..add(
           _RequestConversationMessage.assistant(
             text: _t(
-              en: 'I prepared a complete test draft for ${AppConfig.serviceLabelFor(seed.serviceType, language: _language)}. Add the required site photos or videos, then review the summary before sending.',
-              de: 'Ich habe einen vollständigen Testentwurf für ${AppConfig.serviceLabelFor(seed.serviceType, language: _language)} vorbereitet. Fügen Sie die erforderlichen Standortfotos oder Videos hinzu und prüfen Sie dann die Übersicht vor dem Senden.',
+              en: 'I prepared a complete test draft for ${AppConfig.serviceLabelFor(seed.serviceType, language: _language)}. You can add site photos or videos if they help, then review the summary before sending.',
+              de: 'Ich habe einen vollständigen Testentwurf für ${AppConfig.serviceLabelFor(seed.serviceType, language: _language)} vorbereitet. Sie können Standortfotos oder Videos hinzufügen, wenn sie helfen, und anschließend die Übersicht vor dem Senden prüfen.',
             ),
           ),
         );
@@ -975,12 +967,7 @@ class _CustomerCreateRequestScreenState
               )
             : null;
       case _RequestConversationStep.intakeMedia:
-        return (!_requiresEnhancedIntake || _hasRequiredIntakeMedia)
-            ? null
-            : _t(
-                en: 'Add at least 5 photos before continuing.',
-                de: 'Fügen Sie vor dem Fortfahren mindestens 5 Fotos hinzu.',
-              );
+        return null;
       case _RequestConversationStep.done:
         return null;
     }
@@ -1153,10 +1140,10 @@ class _CustomerCreateRequestScreenState
       ),
       _RequestConversationStep.message => _t(
         en: _requiresEnhancedIntake
-            ? 'Everything is captured. Add at least 5 photos and any optional videos from the intake step below before sending.'
+            ? 'Everything is captured. Review the summary below, or add any photos or videos first if they help the team.'
             : 'Everything is captured. Review the request summary below before sending.',
         de: _requiresEnhancedIntake
-            ? 'Alles ist erfasst. Fügen Sie im Intakeschritt unten mindestens 5 Fotos und optional Videos hinzu, bevor Sie senden.'
+            ? 'Alles ist erfasst. Prüfen Sie unten die Übersicht oder fügen Sie vorher noch Fotos oder Videos hinzu, wenn sie dem Team helfen.'
             : 'Alles ist erfasst. Prüfen Sie die Anfragenübersicht unten vor dem Senden.',
       ),
       _RequestConversationStep.intakeMedia => _t(
@@ -1223,10 +1210,10 @@ class _CustomerCreateRequestScreenState
       ),
       _RequestConversationStep.intakeMedia => _t(
         en: _requiresEnhancedIntake
-            ? 'Add at least 5 photos and any optional videos before sending.'
+            ? 'Add any photos or videos that would help the team before sending.'
             : 'Add any extra intake photos or videos.',
         de: _requiresEnhancedIntake
-            ? 'Fügen Sie vor dem Senden mindestens 5 Fotos und optional Videos hinzu.'
+            ? 'Fügen Sie vor dem Senden Fotos oder Videos hinzu, wenn sie dem Team helfen.'
             : 'Fügen Sie weitere Intake-Fotos oder -Videos hinzu.',
       ),
       _RequestConversationStep.done => _t(
@@ -1387,12 +1374,8 @@ class _CustomerCreateRequestScreenState
         de: 'Bitte beschreiben Sie die Arbeit, die Aufmerksamkeit braucht.',
       ),
       _RequestConversationStep.intakeMedia => _t(
-        en: _requiresEnhancedIntake
-            ? 'Please add at least 5 photos before continuing.'
-            : 'Add or remove intake media here, then return to the summary.',
-        de: _requiresEnhancedIntake
-            ? 'Bitte fügen Sie vor dem Fortfahren mindestens 5 Fotos hinzu.'
-            : 'Fügen Sie hier Intake-Medien hinzu oder entfernen Sie sie und kehren Sie dann zur Übersicht zurück.',
+        en: 'Add or remove intake media here, then return to the summary.',
+        de: 'Fügen Sie hier Intake-Medien hinzu oder entfernen Sie sie und kehren Sie dann zur Übersicht zurück.',
       ),
       _RequestConversationStep.done => '',
     };
@@ -1667,13 +1650,6 @@ class _CustomerCreateRequestScreenState
   }
 
   void _completeIntakeMediaStep() {
-    if (_requiresEnhancedIntake && !_hasRequiredIntakeMedia) {
-      _pushAssistantMessage(
-        _requiredFieldMessage(_RequestConversationStep.intakeMedia),
-      );
-      return;
-    }
-
     setState(() {
       _stepOverride = null;
       _messages.add(
@@ -1748,15 +1724,6 @@ class _CustomerCreateRequestScreenState
         'arrivalContactPhone': _arrivalContactPhoneController.text.trim(),
         'accessNotes': _accessNotesController.text.trim(),
       };
-
-      if (_requiresEnhancedIntake && !_hasRequiredIntakeMedia) {
-        throw Exception(
-          _t(
-            en: 'Add at least $_minimumRequestPhotos photos before sending the request.',
-            de: 'Fügen Sie vor dem Senden der Anfrage mindestens $_minimumRequestPhotos Fotos hinzu.',
-          ),
-        );
-      }
 
       String requestId = widget.requestId ?? '';
 
@@ -2661,8 +2628,8 @@ class _CustomerCreateRequestScreenState
         child: Text(
           _requiresEnhancedIntake
               ? _t(
-                  en: 'After the work details, you will add the required intake photos and any optional videos in the next step.',
-                  de: 'Nach den Arbeitsdetails fügen Sie im nächsten Schritt die erforderlichen Intake-Fotos und optionale Videos hinzu.',
+                  en: 'After the work details, you can add any optional intake photos or videos in the next step, or review the summary directly.',
+                  de: 'Nach den Arbeitsdetails können Sie im nächsten Schritt optionale Intake-Fotos oder -Videos hinzufügen oder direkt die Übersicht prüfen.',
                 )
               : _t(
                   en: 'Add as much detail as you can so the team can review the request properly.',
@@ -2708,8 +2675,8 @@ class _CustomerCreateRequestScreenState
                       : const Icon(Icons.photo_camera_back_rounded, size: 18),
                   label: Text(
                     _t(
-                      en: 'Add photos (${_pendingIntakePhotos.length}/$_maximumRequestPhotos, min $_minimumRequestPhotos)',
-                      de: 'Fotos hinzufügen (${_pendingIntakePhotos.length}/$_maximumRequestPhotos, min. $_minimumRequestPhotos)',
+                      en: 'Add photos (${_pendingIntakePhotos.length}/$_maximumRequestPhotos)',
+                      de: 'Fotos hinzufügen (${_pendingIntakePhotos.length}/$_maximumRequestPhotos)',
                     ),
                   ),
                 ),
@@ -2732,11 +2699,7 @@ class _CustomerCreateRequestScreenState
                   ),
                 ),
                 FilledButton.tonalIcon(
-                  onPressed:
-                      (_isSubmitting ||
-                          (_requiresEnhancedIntake && !_hasRequiredIntakeMedia))
-                      ? null
-                      : _completeIntakeMediaStep,
+                  onPressed: _isSubmitting ? null : _completeIntakeMediaStep,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.cobalt.withValues(alpha: 0.16),
                     foregroundColor: Colors.white,
@@ -2752,10 +2715,10 @@ class _CustomerCreateRequestScreenState
             Text(
               _t(
                 en: _requiresEnhancedIntake
-                    ? 'New requests need at least $_minimumRequestPhotos photos. Videos are optional and can help with remote review.'
+                    ? 'Photos and videos are optional here. Add them when they help explain the site or speed up review.'
                     : 'You can add extra photos or videos here while the request is still unquoted.',
                 de: _requiresEnhancedIntake
-                    ? 'Neue Anfragen benötigen mindestens $_minimumRequestPhotos Fotos. Videos sind optional und können bei der Fernprüfung helfen.'
+                    ? 'Fotos und Videos sind hier optional. Fügen Sie sie hinzu, wenn sie den Standort besser erklären oder die Prüfung beschleunigen.'
                     : 'Sie können hier zusätzliche Fotos oder Videos hinzufügen, solange die Anfrage noch nicht angeboten wurde.',
               ),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -2842,8 +2805,8 @@ class _CustomerCreateRequestScreenState
         de: 'Beschreiben Sie die Arbeit, die Aufmerksamkeit braucht',
       ),
       _RequestConversationStep.intakeMedia => _t(
-        en: 'Add the required intake photos and optional videos',
-        de: 'Fügen Sie die erforderlichen Intake-Fotos und optionale Videos hinzu',
+        en: 'Add any optional intake photos or videos',
+        de: 'Fügen Sie optionale Intake-Fotos oder -Videos hinzu',
       ),
       _RequestConversationStep.done => _t(
         en: 'Ready to submit',
@@ -2972,11 +2935,12 @@ class _CustomerCreateRequestScreenState
         isActive: current == _RequestConversationStep.message,
         isComplete: _messageController.text.trim().isNotEmpty,
       ),
-      if (_requiresEnhancedIntake || _pendingIntakeMediaFiles.isNotEmpty)
+      if (current == _RequestConversationStep.intakeMedia ||
+          _pendingIntakeMediaFiles.isNotEmpty)
         _ProgressChipData(
           label: _t(en: 'Media', de: 'Medien'),
           isActive: current == _RequestConversationStep.intakeMedia,
-          isComplete: !_requiresEnhancedIntake || _hasRequiredIntakeMedia,
+          isComplete: _pendingIntakeMediaFiles.isNotEmpty,
         ),
     ];
   }
@@ -3128,8 +3092,8 @@ class _RequestInfoPanel extends StatelessWidget {
           const SizedBox(height: 12),
           _InfoBullet(
             text: language.pick(
-              en: 'Before a new request can be sent, it must include at least 5 photos. Videos stay optional for remote review.',
-              de: 'Bevor eine neue Anfrage gesendet werden kann, muss sie mindestens 5 Fotos enthalten. Videos bleiben für die Fernprüfung optional.',
+              en: 'Photos and videos are optional. Add them when visual context would help the team review faster.',
+              de: 'Fotos und Videos sind optional. Fügen Sie sie hinzu, wenn visueller Kontext dem Team bei einer schnelleren Prüfung hilft.',
             ),
           ),
           const SizedBox(height: 12),
