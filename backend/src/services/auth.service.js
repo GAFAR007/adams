@@ -886,7 +886,7 @@ async function getDemoAccounts(
     layer: "service",
     operation: "GetDemoAccounts",
     intent:
-      "Return backend-backed quick-fill login accounts for the requested role",
+      "Return backend-backed quick-fill login accounts for active users",
   });
 
   logInfo({
@@ -895,17 +895,19 @@ async function getDemoAccounts(
     layer: "service",
     operation: "GetDemoAccounts",
     intent:
-      "Load active users for the requested auth role before shaping quick-fill accounts",
+      "Load active users before shaping quick-fill accounts",
   });
 
   const users = await User.find({
-    role,
     status: USER_STATUSES.ACTIVE,
-  }).sort({
-    createdAt: 1,
-    firstName: 1,
-    lastName: 1,
-  });
+  })
+    .sort({
+      role: 1,
+      createdAt: 1,
+      firstName: 1,
+      lastName: 1,
+    })
+    .lean();
 
   logInfo({
     ...logContext,
@@ -913,37 +915,40 @@ async function getDemoAccounts(
     layer: "service",
     operation: "GetDemoAccounts",
     intent:
-      "Confirm the role-specific users are ready for quick-fill response shaping",
+      "Confirm active users are ready for quick-fill response shaping",
   });
 
-  const isProduction =
-    process.env.NODE_ENV ===
-    "production";
+  // WHY: Public login shortcuts should stay in sync with real active accounts across environments, but the user must always type the password manually.
+  const accounts = users
+    .map((user) => ({
+      id: String(user._id),
+      fullName:
+        `${user.firstName} ${user.lastName}`.trim(),
+      email: user.email,
+      role: user.role,
+      staffType:
+        user.staffType || null,
+      quickFillPassword: null,
+    }))
+    .sort((left, right) => {
+      if (left.role === role && right.role !== role) {
+        return -1;
+      }
 
-  // WHY: Keep the public demo-account endpoint safe in production, but expose every active local/dev account so the login shortcuts stay in sync with the database.
-  const accounts = isProduction
-    ? []
-    : users.map((user) => ({
-        id: String(user._id),
-        fullName:
-          `${user.firstName} ${user.lastName}`.trim(),
-        email: user.email,
-        role: user.role,
-        staffType:
-          user.staffType || null,
-        quickFillPassword:
-          resolveDemoPassword(
-            role,
-            user.email,
-          ),
-      }));
+      if (left.role !== role && right.role === role) {
+        return 1;
+      }
+
+      return left.fullName.localeCompare(right.fullName);
+    });
 
   return {
     message:
       "Demo accounts fetched successfully",
     role,
+    requestedRole: role,
     passwordAutofillEnabled:
-      !isProduction,
+      false,
     accounts,
   };
 }

@@ -8,9 +8,14 @@ import 'package:flutter/material.dart';
 import 'role_login_screen.dart';
 
 class AdminLoginScreen extends StatelessWidget {
-  const AdminLoginScreen({super.key, this.initialLanguageCode});
+  const AdminLoginScreen({
+    super.key,
+    this.initialLanguageCode,
+    this.initialEmail,
+  });
 
   final String? initialLanguageCode;
+  final String? initialEmail;
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +44,7 @@ class AdminLoginScreen extends StatelessWidget {
       successRoute: '/admin',
       icon: Icons.admin_panel_settings_rounded,
       initialLanguageCode: initialLanguageCode,
+      initialEmail: initialEmail,
     );
   }
 }

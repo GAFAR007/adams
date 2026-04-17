@@ -318,12 +318,17 @@ function buildStaffInviteLink(invite) {
   return buildFrontendHashRoute(`staff/register/${token}`);
 }
 
+function authCookieSameSite() {
+  // WHY: Production currently serves the frontend and backend from different sites, so refresh cookies must opt into cross-site requests.
+  return env.nodeEnv === 'production' ? 'none' : 'lax';
+}
+
 function setRefreshCookie(res, refreshToken) {
   // WHY: Keep the refresh cookie HTTP-only so the browser can send it without exposing it to UI code.
   res.cookie(env.authCookieName, refreshToken, {
     httpOnly: true,
     secure: env.nodeEnv === 'production',
-    sameSite: 'lax',
+    sameSite: authCookieSameSite(),
     path: '/api/v1/auth',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
@@ -334,7 +339,7 @@ function clearRefreshCookie(res) {
   res.clearCookie(env.authCookieName, {
     httpOnly: true,
     secure: env.nodeEnv === 'production',
-    sameSite: 'lax',
+    sameSite: authCookieSameSite(),
     path: '/api/v1/auth',
   });
 }

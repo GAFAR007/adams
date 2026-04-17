@@ -112,6 +112,7 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
     required this.successRoute,
     required this.icon,
     this.initialLanguageCode,
+    this.initialEmail,
   });
 
   final String role;
@@ -119,6 +120,7 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
   final String successRoute;
   final IconData icon;
   final String? initialLanguageCode;
+  final String? initialEmail;
 
   @override
   ConsumerState<RoleLoginScreen> createState() => _RoleLoginScreenState();
@@ -127,7 +129,6 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
 class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _hasAppliedInitialQuickFill = false;
   bool _isPasswordVisible = false;
   late PublicSiteLanguage _language;
 
@@ -143,20 +144,18 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   String get _quickFillTitle =>
       _isGerman ? 'Schnellzugriffe' : 'Quick fill accounts';
   String get _quickFillIntro => _isGerman
-      ? 'Nutzen Sie vorhandene Testkonten oder gehen Sie von hier direkt zum passenden Einstieg.'
-      : 'Use seeded shortcut accounts when available, or jump straight to the right entry point from here.';
+      ? 'Nutzen Sie Backend-Konten aus allen Rollen oder gehen Sie von hier direkt zum passenden Einstieg.'
+      : 'Use backend accounts from every role, or jump straight to the right entry point from here.';
   String get _loadingQuickFillLabel =>
       _isGerman ? 'Schnellzugriffe laden' : 'Loading quick fill accounts';
   String get _quickFillErrorLabel => _isGerman
       ? 'Backend-Konten konnten gerade nicht geladen werden.'
       : 'Unable to load quick fill accounts from the backend right now.';
-  String get _manualPasswordLabel =>
-      _isGerman ? 'Passwort manuell eingeben' : 'Enter password manually';
-  String get _seededPasswordReadyLabel =>
-      _isGerman ? 'Passwort hinterlegt' : 'Seeded password ready';
-  String get _seededPasswordHint => _isGerman
-      ? 'Seed-Konten können in dieser Umgebung ihr Passwort automatisch ergänzen, wenn es vom Backend bereitgestellt wird.'
-      : 'Seeded accounts can autofill their password in this environment when available from the backend.';
+  String get _emailShortcutLabel =>
+      _isGerman ? 'E-Mail einsetzen' : 'Fill email only';
+  String get _quickFillHint => _isGerman
+      ? 'Schnellzugriffe setzen nur die E-Mail ein. Bei einer anderen Rolle wird der passende Login geöffnet.'
+      : 'Quick fill only inserts the email. If the account belongs to another role, the matching login opens.';
   String get _secureAccessTitle =>
       _isGerman ? 'Sicherer Zugang' : 'Secure access';
   String get _secureAccessSubtitle => _isGerman
@@ -188,6 +187,10 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     _language = initialCode == null || initialCode.trim().isEmpty
         ? ref.read(appLanguageProvider)
         : publicSiteLanguageFromCode(initialCode);
+    final initialEmail = widget.initialEmail?.trim();
+    if (initialEmail != null && initialEmail.isNotEmpty) {
+      _emailController.text = initialEmail;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -209,6 +212,20 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     return code == 'de' ? '$path?lang=de' : path;
   }
 
+  String _loginRouteForAccount(DemoLoginAccount account) {
+    final path = switch (account.role) {
+      'admin' => '/admin/login',
+      'staff' => '/staff/login',
+      _ => '/login',
+    };
+    final query = <String, String>{
+      if (publicSiteLanguageCode(_language) == 'de') 'lang': 'de',
+      'email': account.email,
+    };
+
+    return Uri(path: path, queryParameters: query).toString();
+  }
+
   PublicPageVisualData get _heroVisualData {
     switch (widget.copy.heroVisualKey) {
       case 'about':
@@ -222,6 +239,11 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   }
 
   void _applyQuickFillAccount(DemoLoginAccount account) {
+    if (account.role != widget.role) {
+      context.go(_loginRouteForAccount(account));
+      return;
+    }
+
     _emailController.text = account.email;
     _passwordController.text = account.quickFillPassword ?? '';
     setState(() {});
@@ -247,6 +269,18 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
       default:
         return _isGerman ? 'Benutzer' : 'User';
     }
+  }
+
+  String _quickFillActionLabel(DemoLoginAccount account) {
+    if (account.role == widget.role) {
+      return _emailShortcutLabel;
+    }
+
+    return switch (account.role) {
+      'admin' => _isGerman ? 'Admin-Login öffnen' : 'Open admin login',
+      'staff' => _isGerman ? 'Staff-Login öffnen' : 'Open staff login',
+      _ => _isGerman ? 'Kunden-Login öffnen' : 'Open customer login',
+    };
   }
 
   Future<void> _submit() async {
@@ -354,13 +388,9 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  account.quickFillPassword == null
-                      ? _manualPasswordLabel
-                      : _seededPasswordReadyLabel,
+                  _quickFillActionLabel(account),
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: account.quickFillPassword == null
-                        ? AppTheme.ember
-                        : AppTheme.pine,
+                    color: AppTheme.cobalt,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -561,7 +591,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Text(
-                _seededPasswordHint,
+                _quickFillHint,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.ink.withValues(alpha: 0.72),
                   height: 1.45,
@@ -844,28 +874,6 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     final authState = ref.watch(authControllerProvider);
     final demoAccountsAsync = ref.watch(authDemoAccountsProvider(widget.role));
     final publicProfileAsync = ref.watch(publicCompanyProfileProvider);
-
-    ref.listen<AsyncValue<DemoLoginBundle>>(
-      authDemoAccountsProvider(widget.role),
-      (previous, next) {
-        next.whenData((bundle) {
-          if (_hasAppliedInitialQuickFill || bundle.accounts.isEmpty) {
-            return;
-          }
-
-          final firstAccount = bundle.accounts.first;
-          if (_emailController.text.isEmpty) {
-            _emailController.text = firstAccount.email;
-          }
-          if (_passwordController.text.isEmpty &&
-              firstAccount.quickFillPassword != null) {
-            _passwordController.text = firstAccount.quickFillPassword!;
-          }
-
-          _hasAppliedInitialQuickFill = true;
-        });
-      },
-    );
 
     return publicProfileAsync.when(
       data: (profile) =>
