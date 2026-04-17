@@ -112,6 +112,7 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
     required this.successRoute,
     required this.icon,
     this.initialLanguageCode,
+    this.initialEmail,
   });
 
   final String role;
@@ -119,6 +120,7 @@ class RoleLoginScreen extends ConsumerStatefulWidget {
   final String successRoute;
   final IconData icon;
   final String? initialLanguageCode;
+  final String? initialEmail;
 
   @override
   ConsumerState<RoleLoginScreen> createState() => _RoleLoginScreenState();
@@ -142,8 +144,8 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   String get _quickFillTitle =>
       _isGerman ? 'Schnellzugriffe' : 'Quick fill accounts';
   String get _quickFillIntro => _isGerman
-      ? 'Nutzen Sie vorhandene Testkonten oder gehen Sie von hier direkt zum passenden Einstieg.'
-      : 'Use seeded shortcut accounts when available, or jump straight to the right entry point from here.';
+      ? 'Nutzen Sie Backend-Konten aus allen Rollen oder gehen Sie von hier direkt zum passenden Einstieg.'
+      : 'Use backend accounts from every role, or jump straight to the right entry point from here.';
   String get _loadingQuickFillLabel =>
       _isGerman ? 'Schnellzugriffe laden' : 'Loading quick fill accounts';
   String get _quickFillErrorLabel => _isGerman
@@ -152,8 +154,8 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   String get _emailShortcutLabel =>
       _isGerman ? 'E-Mail einsetzen' : 'Fill email only';
   String get _quickFillHint => _isGerman
-      ? 'Schnellzugriffe setzen nur die E-Mail ein. Das Passwort geben Sie weiterhin manuell ein.'
-      : 'Quick fill accounts only insert the email. Enter the password manually.';
+      ? 'Schnellzugriffe setzen nur die E-Mail ein. Bei einer anderen Rolle wird der passende Login geöffnet.'
+      : 'Quick fill only inserts the email. If the account belongs to another role, the matching login opens.';
   String get _secureAccessTitle =>
       _isGerman ? 'Sicherer Zugang' : 'Secure access';
   String get _secureAccessSubtitle => _isGerman
@@ -185,6 +187,10 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     _language = initialCode == null || initialCode.trim().isEmpty
         ? ref.read(appLanguageProvider)
         : publicSiteLanguageFromCode(initialCode);
+    final initialEmail = widget.initialEmail?.trim();
+    if (initialEmail != null && initialEmail.isNotEmpty) {
+      _emailController.text = initialEmail;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -206,6 +212,20 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     return code == 'de' ? '$path?lang=de' : path;
   }
 
+  String _loginRouteForAccount(DemoLoginAccount account) {
+    final path = switch (account.role) {
+      'admin' => '/admin/login',
+      'staff' => '/staff/login',
+      _ => '/login',
+    };
+    final query = <String, String>{
+      if (publicSiteLanguageCode(_language) == 'de') 'lang': 'de',
+      'email': account.email,
+    };
+
+    return Uri(path: path, queryParameters: query).toString();
+  }
+
   PublicPageVisualData get _heroVisualData {
     switch (widget.copy.heroVisualKey) {
       case 'about':
@@ -219,6 +239,11 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
   }
 
   void _applyQuickFillAccount(DemoLoginAccount account) {
+    if (account.role != widget.role) {
+      context.go(_loginRouteForAccount(account));
+      return;
+    }
+
     _emailController.text = account.email;
     _passwordController.clear();
     setState(() {});
@@ -244,6 +269,18 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
       default:
         return _isGerman ? 'Benutzer' : 'User';
     }
+  }
+
+  String _quickFillActionLabel(DemoLoginAccount account) {
+    if (account.role == widget.role) {
+      return _emailShortcutLabel;
+    }
+
+    return switch (account.role) {
+      'admin' => _isGerman ? 'Admin-Login öffnen' : 'Open admin login',
+      'staff' => _isGerman ? 'Staff-Login öffnen' : 'Open staff login',
+      _ => _isGerman ? 'Kunden-Login öffnen' : 'Open customer login',
+    };
   }
 
   Future<void> _submit() async {
@@ -351,7 +388,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  _emailShortcutLabel,
+                  _quickFillActionLabel(account),
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: AppTheme.cobalt,
                     fontWeight: FontWeight.w700,

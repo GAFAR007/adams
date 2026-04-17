@@ -74,11 +74,17 @@ function logFileStorageStatus() {
 }
 
 function detectResourceType(mimeType) {
-  return String(mimeType || '')
-    .toLowerCase()
-    .startsWith('image/')
-    ? 'image'
-    : 'raw';
+  const normalizedMimeType = String(mimeType || '').toLowerCase();
+
+  if (normalizedMimeType.startsWith('image/')) {
+    return 'image';
+  }
+
+  if (normalizedMimeType.startsWith('video/')) {
+    return 'video';
+  }
+
+  return 'raw';
 }
 
 function normalizedExtension(fileName) {

@@ -1731,6 +1731,7 @@ class _CustomerCreateRequestScreenState
 
   Future<void> _submitRequest() async {
     setState(() => _isSubmitting = true);
+    var submissionCompleted = false;
 
     try {
       final repository = ref.read(customerRepositoryProvider);
@@ -1848,6 +1849,7 @@ class _CustomerCreateRequestScreenState
           ),
         ),
       );
+      submissionCompleted = true;
       context.go('/app/requests');
     } catch (error) {
       if (!mounted) {
@@ -1863,8 +1865,10 @@ class _CustomerCreateRequestScreenState
       if (mounted) {
         setState(() {
           _isSubmitting = false;
-          _pendingIntakePhotos.clear();
-          _pendingIntakeVideos.clear();
+          if (submissionCompleted) {
+            _pendingIntakePhotos.clear();
+            _pendingIntakeVideos.clear();
+          }
         });
       }
     }

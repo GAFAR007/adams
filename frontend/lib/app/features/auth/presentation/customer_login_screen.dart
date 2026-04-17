@@ -8,9 +8,14 @@ import 'package:flutter/material.dart';
 import 'role_login_screen.dart';
 
 class CustomerLoginScreen extends StatelessWidget {
-  const CustomerLoginScreen({super.key, this.initialLanguageCode});
+  const CustomerLoginScreen({
+    super.key,
+    this.initialLanguageCode,
+    this.initialEmail,
+  });
 
   final String? initialLanguageCode;
+  final String? initialEmail;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +47,7 @@ class CustomerLoginScreen extends StatelessWidget {
       successRoute: '/app/requests',
       icon: Icons.home_work_rounded,
       initialLanguageCode: initialLanguageCode,
+      initialEmail: initialEmail,
     );
   }
 }

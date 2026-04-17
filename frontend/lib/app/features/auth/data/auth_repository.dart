@@ -115,98 +115,88 @@ class AuthRepository {
   }
 
   DemoLoginBundle _fallbackDemoAccounts(String role) {
-    switch (role) {
-      case 'admin':
-        return const DemoLoginBundle(
-          role: 'admin',
-          passwordAutofillEnabled: false,
-          accounts: <DemoLoginAccount>[
-            DemoLoginAccount(
-              id: 'fallback-admin-1',
-              fullName: 'Adams Gafar',
-              email: 'admin@adams.local',
-              role: 'admin',
-              staffType: null,
-              quickFillPassword: null,
-            ),
-          ],
-        );
-      case 'customer':
-        return const DemoLoginBundle(
-          role: 'customer',
-          passwordAutofillEnabled: false,
-          accounts: <DemoLoginAccount>[
-            DemoLoginAccount(
-              id: 'fallback-customer-1',
-              fullName: 'Fatima Kaya',
-              email: 'customer1@adams.local',
-              role: 'customer',
-              staffType: null,
-              quickFillPassword: null,
-            ),
-          ],
-        );
-      case 'staff':
-        return const DemoLoginBundle(
-          role: 'staff',
-          passwordAutofillEnabled: false,
-          accounts: <DemoLoginAccount>[
-            DemoLoginAccount(
-              id: 'fallback-staff-care-1',
-              fullName: 'Amina Yilmaz',
-              email: 'care1@adams.local',
-              role: 'staff',
-              staffType: 'customer_care',
-              quickFillPassword: null,
-            ),
-            DemoLoginAccount(
-              id: 'fallback-staff-1',
-              fullName: 'Daniel Weber',
-              email: 'staff1@adams.local',
-              role: 'staff',
-              staffType: 'technician',
-              quickFillPassword: null,
-            ),
-            DemoLoginAccount(
-              id: 'fallback-staff-2',
-              fullName: 'Sofia Keller',
-              email: 'staff2@adams.local',
-              role: 'staff',
-              staffType: 'contractor',
-              quickFillPassword: null,
-            ),
-            DemoLoginAccount(
-              id: 'fallback-staff-3',
-              fullName: 'Jonas Hartmann',
-              email: 'staff3@adams.local',
-              role: 'staff',
-              staffType: 'technician',
-              quickFillPassword: null,
-            ),
-            DemoLoginAccount(
-              id: 'fallback-staff-4',
-              fullName: 'Leonie Brandt',
-              email: 'staff4@adams.local',
-              role: 'staff',
-              staffType: 'technician',
-              quickFillPassword: null,
-            ),
-            DemoLoginAccount(
-              id: 'fallback-staff-5',
-              fullName: 'Marek Nowak',
-              email: 'staff5@adams.local',
-              role: 'staff',
-              staffType: 'contractor',
-              quickFillPassword: null,
-            ),
-          ],
-        );
-      default:
-        return DemoLoginBundle(
-          role: role,
-          passwordAutofillEnabled: false,
-          accounts: const <DemoLoginAccount>[],
-        );
-    }
+    final accounts =
+        <DemoLoginAccount>[
+          const DemoLoginAccount(
+            id: 'fallback-admin-1',
+            fullName: 'Adams Gafar',
+            email: 'admin@adams.local',
+            role: 'admin',
+            staffType: null,
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-customer-1',
+            fullName: 'Fatima Kaya',
+            email: 'customer1@adams.local',
+            role: 'customer',
+            staffType: null,
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-care-1',
+            fullName: 'Amina Yilmaz',
+            email: 'care1@adams.local',
+            role: 'staff',
+            staffType: 'customer_care',
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-1',
+            fullName: 'Daniel Weber',
+            email: 'staff1@adams.local',
+            role: 'staff',
+            staffType: 'technician',
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-2',
+            fullName: 'Sofia Keller',
+            email: 'staff2@adams.local',
+            role: 'staff',
+            staffType: 'contractor',
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-3',
+            fullName: 'Jonas Hartmann',
+            email: 'staff3@adams.local',
+            role: 'staff',
+            staffType: 'technician',
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-4',
+            fullName: 'Leonie Brandt',
+            email: 'staff4@adams.local',
+            role: 'staff',
+            staffType: 'technician',
+            quickFillPassword: null,
+          ),
+          const DemoLoginAccount(
+            id: 'fallback-staff-5',
+            fullName: 'Marek Nowak',
+            email: 'staff5@adams.local',
+            role: 'staff',
+            staffType: 'contractor',
+            quickFillPassword: null,
+          ),
+        ]..sort((left, right) {
+          if (left.role == role && right.role != role) {
+            return -1;
+          }
+
+          if (left.role != role && right.role == role) {
+            return 1;
+          }
+
+          return left.fullName.compareTo(right.fullName);
+        });
+
+    return DemoLoginBundle(
+      role: role,
+      passwordAutofillEnabled: false,
+      accounts: accounts,
+    );
   }
 }

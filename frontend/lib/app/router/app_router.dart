@@ -189,6 +189,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             CustomerLoginScreen(
               initialLanguageCode: state.uri.queryParameters['lang'],
+              initialEmail: state.uri.queryParameters['email'],
             ),
       ),
       GoRoute(
@@ -204,6 +205,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             AdminLoginScreen(
               initialLanguageCode: state.uri.queryParameters['lang'],
+              initialEmail: state.uri.queryParameters['email'],
             ),
       ),
       GoRoute(
@@ -211,6 +213,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             StaffLoginScreen(
               initialLanguageCode: state.uri.queryParameters['lang'],
+              initialEmail: state.uri.queryParameters['email'],
             ),
       ),
       GoRoute(

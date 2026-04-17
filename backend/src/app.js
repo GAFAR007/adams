@@ -81,6 +81,14 @@ function buildApp() {
   // WHY: Auth refresh relies on cookies, so parsing them must happen before auth controllers run.
   app.use(cookieParser());
 
+  app.get('/', (req, res) => {
+    res.status(200).json({
+      message: 'Adams backend is running',
+      health: '/health',
+      api: '/api/v1',
+    });
+  });
+
   app.get('/health', (req, res) => {
     // WHY: Keep health checks dependency-light so infra can verify the process quickly.
     res.status(200).json({ message: 'Backend is healthy' });
