@@ -63,7 +63,6 @@ const {
 } = require('./file-storage.service');
 const { populateServiceRequestRelations } = require('../utils/request-query');
 
-const MIN_REQUEST_INTAKE_PHOTOS = 5;
 const MAX_REQUEST_INTAKE_PHOTOS = 12;
 const MAX_REQUEST_INTAKE_VIDEOS = 2;
 
@@ -180,17 +179,6 @@ async function createRequest(customerUserId, payload, files, logContext) {
   const intakeVideoFiles = intakeFiles.filter((file) =>
     isVideoMimeType(file?.mimetype),
   );
-
-  if (intakePhotoFiles.length < MIN_REQUEST_INTAKE_PHOTOS) {
-    throw new AppError({
-      message: 'At least 5 request photos are required before submission',
-      statusCode: 400,
-      classification: ERROR_CLASSIFICATIONS.MISSING_REQUIRED_FIELD,
-      errorCode: 'CUSTOMER_REQUEST_MINIMUM_PHOTOS_REQUIRED',
-      resolutionHint: 'Upload at least 5 site photos and try again',
-      step: LOG_STEPS.VALIDATION_FAIL,
-    });
-  }
 
   if (intakePhotoFiles.length > MAX_REQUEST_INTAKE_PHOTOS) {
     throw new AppError({
