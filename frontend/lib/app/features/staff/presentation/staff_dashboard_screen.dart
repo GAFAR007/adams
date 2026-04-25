@@ -3352,116 +3352,161 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                               final ownEstimation = _currentUserEstimationFor(
                                 sheetRequest,
                               );
-                              return _StaffChatActionTray(
-                                request: sheetRequest,
-                                isCustomerCareUser: _isCustomerCareUser,
-                                isSendingUpdateRequest: _sendingMessageIds
-                                    .contains(sheetRequest.id),
-                                isSendingInvoice: _sendingInvoiceIds.contains(
-                                  sheetRequest.id,
-                                ),
-                                hasPendingCustomerUpdateRequest:
-                                    _hasPendingCustomerUpdateRequest(
-                                      sheetRequest,
-                                    ),
-                                ownEstimation: ownEstimation,
-                                isEstimationLocked:
-                                    sheetRequest.estimationLocked,
-                                isReviewingPaymentProof:
-                                    _reviewingPaymentProofIds.contains(
-                                      sheetRequest.id,
-                                    ),
-                                onAskCustomerUpdate: () {
-                                  Navigator.of(modalContext).pop();
-                                  _sendCustomerUpdateRequest(sheetRequest);
-                                },
-                                onClearCustomerUpdate: () {
-                                  Navigator.of(modalContext).pop();
-                                  _clearCustomerUpdateRequest(sheetRequest);
-                                },
-                                onEditEstimate: () {
-                                  Navigator.of(modalContext).pop();
-                                  _editEstimation(sheetRequest);
-                                },
-                                canClockRequest: _canCurrentStaffClockRequest(
-                                  sheetRequest,
-                                ),
-                                isClockingRequest: _clockingRequestIds.contains(
-                                  sheetRequest.id,
-                                ),
-                                hasActiveClockLog:
-                                    _activeCurrentStaffWorkLog(sheetRequest) !=
-                                    null,
-                                onClockRequest: () async {
-                                  final action =
-                                      _activeCurrentStaffWorkLog(
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  _StaffChatActionTray(
+                                    request: sheetRequest,
+                                    isCustomerCareUser: _isCustomerCareUser,
+                                    isSendingUpdateRequest: _sendingMessageIds
+                                        .contains(sheetRequest.id),
+                                    isSendingInvoice: _sendingInvoiceIds
+                                        .contains(sheetRequest.id),
+                                    hasPendingCustomerUpdateRequest:
+                                        _hasPendingCustomerUpdateRequest(
+                                          sheetRequest,
+                                        ),
+                                    ownEstimation: ownEstimation,
+                                    isEstimationLocked:
+                                        sheetRequest.estimationLocked,
+                                    isReviewingPaymentProof:
+                                        _reviewingPaymentProofIds.contains(
+                                          sheetRequest.id,
+                                        ),
+                                    onAskCustomerUpdate: () {
+                                      Navigator.of(modalContext).pop();
+                                      _sendCustomerUpdateRequest(sheetRequest);
+                                    },
+                                    onClearCustomerUpdate: () {
+                                      Navigator.of(modalContext).pop();
+                                      _clearCustomerUpdateRequest(sheetRequest);
+                                    },
+                                    onEditEstimate: () {
+                                      Navigator.of(modalContext).pop();
+                                      _editEstimation(sheetRequest);
+                                    },
+                                    canClockRequest:
+                                        _canCurrentStaffClockRequest(
+                                          sheetRequest,
+                                        ),
+                                    isClockingRequest: _clockingRequestIds
+                                        .contains(sheetRequest.id),
+                                    hasActiveClockLog:
+                                        _activeCurrentStaffWorkLog(
+                                          sheetRequest,
+                                        ) !=
+                                        null,
+                                    onClockRequest: () async {
+                                      final action =
+                                          _activeCurrentStaffWorkLog(
+                                                sheetRequest,
+                                              ) ==
+                                              null
+                                          ? 'clock_in'
+                                          : 'clock_out';
+                                      Navigator.of(modalContext).pop();
+                                      await _clockRequestWork(
+                                        sheetRequest,
+                                        action,
+                                      );
+                                    },
+                                    canCompleteWork:
+                                        _canCurrentStaffCompleteRequestWork(
+                                          sheetRequest,
+                                        ),
+                                    isCompletingWork: _completingWorkRequestIds
+                                        .contains(sheetRequest.id),
+                                    onCompleteWork: () async {
+                                      final updatedRequest =
+                                          await _completeRequestWork(
                                             sheetRequest,
-                                          ) ==
-                                          null
-                                      ? 'clock_in'
-                                      : 'clock_out';
-                                  Navigator.of(modalContext).pop();
-                                  await _clockRequestWork(sheetRequest, action);
-                                },
-                                canCompleteWork:
-                                    _canCurrentStaffCompleteRequestWork(
-                                      sheetRequest,
+                                          );
+                                      if (updatedRequest != null) {
+                                        setModalState(
+                                          () => sheetRequest = updatedRequest,
+                                        );
+                                      }
+                                    },
+                                    onBookSiteReview: () {
+                                      Navigator.of(modalContext).pop();
+                                      _bookSiteReview(sheetRequest);
+                                    },
+                                    onRunFinalEstimate: () {
+                                      Navigator.of(modalContext).pop();
+                                      _runFinalEstimate(sheetRequest);
+                                    },
+                                    onOpenPaymentProof:
+                                        sheetRequest.invoice?.proof?.fileUrl ==
+                                            null
+                                        ? null
+                                        : () {
+                                            Navigator.of(modalContext).pop();
+                                            _openPaymentProof(sheetRequest);
+                                          },
+                                    onOpenReceipt:
+                                        sheetRequest.invoice?.receiptUrl == null
+                                        ? null
+                                        : () {
+                                            Navigator.of(modalContext).pop();
+                                            _openReceipt(sheetRequest);
+                                          },
+                                    onApprovePaymentProof:
+                                        sheetRequest
+                                                .invoice
+                                                ?.isProofSubmitted ==
+                                            true
+                                        ? () {
+                                            Navigator.of(modalContext).pop();
+                                            _reviewPaymentProof(
+                                              sheetRequest,
+                                              decision: 'approved',
+                                            );
+                                          }
+                                        : null,
+                                    onRejectPaymentProof:
+                                        sheetRequest
+                                                .invoice
+                                                ?.isProofSubmitted ==
+                                            true
+                                        ? () {
+                                            Navigator.of(modalContext).pop();
+                                            _reviewPaymentProof(
+                                              sheetRequest,
+                                              decision: 'rejected',
+                                            );
+                                          }
+                                        : null,
+                                  ),
+                                  if (!_isCustomerCareUser) ...<Widget>[
+                                    const SizedBox(height: 10),
+                                    OutlinedButton.icon(
+                                      onPressed: () {
+                                        Navigator.of(modalContext).pop();
+                                        _showWorkflowSheet(
+                                          context,
+                                          sheetRequest,
+                                        );
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        backgroundColor: Colors.white
+                                            .withValues(alpha: 0.04),
+                                        side: BorderSide(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.tune_rounded),
+                                      label: Text(
+                                        _t(
+                                          en: 'Update workflow status',
+                                          de: 'Ablaufstatus aktualisieren',
+                                        ),
+                                      ),
                                     ),
-                                isCompletingWork: _completingWorkRequestIds
-                                    .contains(sheetRequest.id),
-                                onCompleteWork: () async {
-                                  final updatedRequest =
-                                      await _completeRequestWork(sheetRequest);
-                                  if (updatedRequest != null) {
-                                    setModalState(
-                                      () => sheetRequest = updatedRequest,
-                                    );
-                                  }
-                                },
-                                onBookSiteReview: () {
-                                  Navigator.of(modalContext).pop();
-                                  _bookSiteReview(sheetRequest);
-                                },
-                                onRunFinalEstimate: () {
-                                  Navigator.of(modalContext).pop();
-                                  _runFinalEstimate(sheetRequest);
-                                },
-                                onOpenPaymentProof:
-                                    sheetRequest.invoice?.proof?.fileUrl == null
-                                    ? null
-                                    : () {
-                                        Navigator.of(modalContext).pop();
-                                        _openPaymentProof(sheetRequest);
-                                      },
-                                onOpenReceipt:
-                                    sheetRequest.invoice?.receiptUrl == null
-                                    ? null
-                                    : () {
-                                        Navigator.of(modalContext).pop();
-                                        _openReceipt(sheetRequest);
-                                      },
-                                onApprovePaymentProof:
-                                    sheetRequest.invoice?.isProofSubmitted ==
-                                        true
-                                    ? () {
-                                        Navigator.of(modalContext).pop();
-                                        _reviewPaymentProof(
-                                          sheetRequest,
-                                          decision: 'approved',
-                                        );
-                                      }
-                                    : null,
-                                onRejectPaymentProof:
-                                    sheetRequest.invoice?.isProofSubmitted ==
-                                        true
-                                    ? () {
-                                        Navigator.of(modalContext).pop();
-                                        _reviewPaymentProof(
-                                          sheetRequest,
-                                          decision: 'rejected',
-                                        );
-                                      }
-                                    : null,
+                                  ],
+                                ],
                               );
                             },
                           ),
@@ -4162,7 +4207,6 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final composerEnabled =
         request.assignedStaff != null && request.status != 'closed';
     final canOpenRequestActions = composerEnabled;
-    final canOpenWorkflowActions = composerEnabled && !_isCustomerCareUser;
     final aiCoverActive = _isAiCoverActive(request, currentAvailability);
     final isCompact = MediaQuery.sizeOf(context).width < 720;
     final collapseProgress = isCompact
@@ -4193,16 +4237,13 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
               composerEnabled: composerEnabled,
             ),
             onOpenWorkflow: canOpenRequestActions
-                ? () => canOpenWorkflowActions
-                      ? _showWorkflowSheet(context, request)
-                      : _showRequestProfileSheet(
-                          context,
-                          request,
-                          composerEnabled: composerEnabled,
-                        )
+                ? () => _showRequestProfileSheet(
+                    context,
+                    request,
+                    composerEnabled: composerEnabled,
+                  )
                 : null,
-            workflowButtonOpensRequestActions:
-                canOpenRequestActions && !canOpenWorkflowActions,
+            workflowButtonOpensRequestActions: canOpenRequestActions,
             collapseProgress: collapseProgress,
             dark: true,
           ),
@@ -4322,13 +4363,11 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: FilledButton.tonalIcon(
-                                  onPressed: () => canOpenWorkflowActions
-                                      ? _showWorkflowSheet(context, request)
-                                      : _showRequestProfileSheet(
-                                          context,
-                                          request,
-                                          composerEnabled: composerEnabled,
-                                        ),
+                                  onPressed: () => _showRequestProfileSheet(
+                                    context,
+                                    request,
+                                    composerEnabled: composerEnabled,
+                                  ),
                                   style: FilledButton.styleFrom(
                                     backgroundColor: Colors.white.withValues(
                                       alpha: 0.08,
@@ -4342,21 +4381,14 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                                         MaterialTapTargetSize.shrinkWrap,
                                   ),
                                   icon: Icon(
-                                    canOpenWorkflowActions
-                                        ? Icons.tune_rounded
-                                        : Icons.more_horiz_rounded,
+                                    Icons.more_horiz_rounded,
                                     size: 18,
                                   ),
                                   label: Text(
-                                    canOpenWorkflowActions
-                                        ? _t(
-                                            en: 'Workflow actions',
-                                            de: 'Ablaufaktionen',
-                                          )
-                                        : _t(
-                                            en: 'Request actions',
-                                            de: 'Anfrageaktionen',
-                                          ),
+                                    _t(
+                                      en: 'Request actions',
+                                      de: 'Anfrageaktionen',
+                                    ),
                                   ),
                                 ),
                               ),
@@ -4948,8 +4980,14 @@ class _StaffChatActionTray extends ConsumerWidget {
             de: 'Schätzung nach Angebot gesperrt',
           )
         : hasOwnEstimation
-        ? language.pick(en: 'Update estimate', de: 'Schätzung aktualisieren')
-        : language.pick(en: 'Create estimate', de: 'Schätzung erstellen');
+        ? language.pick(
+            en: 'Update quote / estimate',
+            de: 'Angebot / Schätzung aktualisieren',
+          )
+        : language.pick(
+            en: 'Create quote / estimate',
+            de: 'Angebot / Schätzung erstellen',
+          );
     final estimationSummary = invoice == null
         ? isCustomerCareUser
               ? language.pick(
@@ -4971,18 +5009,18 @@ class _StaffChatActionTray extends ConsumerWidget {
           );
     final siteReviewActionLabel = hasSiteReviewBooking
         ? language.pick(
-            en: 'Update scheduled review',
-            de: 'Geplante Besichtigung aktualisieren',
+            en: 'Update scheduled visit',
+            de: 'Geplanten Besuch aktualisieren',
           )
-        : language.pick(en: 'Book scheduled review', de: 'Besichtigung buchen');
+        : language.pick(en: 'Schedule visit', de: 'Besuch planen');
     final finalEstimateActionLabel = hasOwnFinalEstimate
         ? language.pick(
-            en: 'Update estimate after review',
-            de: 'Schätzung nach Besichtigung aktualisieren',
+            en: 'Update quote after visit',
+            de: 'Angebot nach Besuch aktualisieren',
           )
         : language.pick(
-            en: 'Run estimate after review',
-            de: 'Schätzung nach Besichtigung starten',
+            en: 'Create quote after visit',
+            de: 'Angebot nach Besuch erstellen',
           );
     final stageSummary = switch ((invoice != null, showSiteReviewFlow)) {
       (true, _) => estimationSummary,
