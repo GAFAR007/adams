@@ -2746,6 +2746,7 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     required String currentAvailability,
     required VoidCallback onOpenProfile,
     required VoidCallback? onOpenWorkflow,
+    bool workflowButtonOpensRequestActions = false,
     double collapseProgress = 0,
     bool dark = false,
   }) {
@@ -2856,6 +2857,8 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                       : onOpenWorkflow,
                   icon: isWaiting
                       ? Icons.play_arrow_rounded
+                      : workflowButtonOpensRequestActions
+                      ? Icons.more_horiz_rounded
                       : Icons.tune_rounded,
                   label: '',
                   filled: isWaiting,
@@ -4153,8 +4156,13 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
     final controller = _controllerFor(request.id);
     final isSending = _sendingMessageIds.contains(request.id);
     final isUploadingAttachment = _uploadingAttachmentIds.contains(request.id);
+    final canAttendWaitingRequest =
+        request.assignedStaff == null && request.status != 'closed';
+    final isAttending = _attendingQueueIds.contains(request.id);
     final composerEnabled =
         request.assignedStaff != null && request.status != 'closed';
+    final canOpenRequestActions = composerEnabled;
+    final canOpenWorkflowActions = composerEnabled && !_isCustomerCareUser;
     final aiCoverActive = _isAiCoverActive(request, currentAvailability);
     final isCompact = MediaQuery.sizeOf(context).width < 720;
     final collapseProgress = isCompact
@@ -4184,10 +4192,17 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
               request,
               composerEnabled: composerEnabled,
             ),
-            onOpenWorkflow:
-                request.assignedStaff != null && request.status != 'closed'
-                ? () => _showWorkflowSheet(context, request)
+            onOpenWorkflow: canOpenRequestActions
+                ? () => canOpenWorkflowActions
+                      ? _showWorkflowSheet(context, request)
+                      : _showRequestProfileSheet(
+                          context,
+                          request,
+                          composerEnabled: composerEnabled,
+                        )
                 : null,
+            workflowButtonOpensRequestActions:
+                canOpenRequestActions && !canOpenWorkflowActions,
             collapseProgress: collapseProgress,
             dark: true,
           ),
@@ -4266,6 +4281,85 @@ class _StaffDashboardScreenState extends ConsumerState<StaffDashboardScreen> {
                                   request,
                                 )) ...<Widget>[
                               _buildConversationClockStrip(request),
+                              const SizedBox(height: 10),
+                            ],
+                            if (canAttendWaitingRequest) ...<Widget>[
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed: isAttending
+                                      ? null
+                                      : () => _attendQueue(request),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.cobalt,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                  icon: Icon(
+                                    isAttending
+                                        ? Icons.more_horiz_rounded
+                                        : Icons.play_arrow_rounded,
+                                  ),
+                                  label: Text(
+                                    isAttending
+                                        ? _t(
+                                            en: 'Taking request...',
+                                            de: 'Anfrage wird übernommen...',
+                                          )
+                                        : _t(
+                                            en: 'Take this customer request',
+                                            de: 'Diese Kundenanfrage übernehmen',
+                                          ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            if (canOpenRequestActions) ...<Widget>[
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: FilledButton.tonalIcon(
+                                  onPressed: () => canOpenWorkflowActions
+                                      ? _showWorkflowSheet(context, request)
+                                      : _showRequestProfileSheet(
+                                          context,
+                                          request,
+                                          composerEnabled: composerEnabled,
+                                        ),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.white.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  icon: Icon(
+                                    canOpenWorkflowActions
+                                        ? Icons.tune_rounded
+                                        : Icons.more_horiz_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    canOpenWorkflowActions
+                                        ? _t(
+                                            en: 'Workflow actions',
+                                            de: 'Ablaufaktionen',
+                                          )
+                                        : _t(
+                                            en: 'Request actions',
+                                            de: 'Anfrageaktionen',
+                                          ),
+                                  ),
+                                ),
+                              ),
                               const SizedBox(height: 10),
                             ],
                             RequestMessageComposer(
