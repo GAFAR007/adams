@@ -1818,8 +1818,9 @@ class _HeroCopy extends StatelessWidget {
             OutlinedButton(
               onPressed: () => context.go(customerLoginPath),
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white38),
+                backgroundColor: Colors.white.withValues(alpha: 0.9),
+                foregroundColor: AppTheme.ink,
+                side: const BorderSide(color: Colors.white70),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 16,
