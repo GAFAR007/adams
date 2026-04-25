@@ -245,7 +245,7 @@ class _RoleLoginScreenState extends ConsumerState<RoleLoginScreen> {
     }
 
     _emailController.text = account.email;
-    _passwordController.text = account.quickFillPassword ?? '';
+    _passwordController.clear();
     setState(() {});
   }
 

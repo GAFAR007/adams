@@ -1818,8 +1818,9 @@ class _HeroCopy extends StatelessWidget {
             OutlinedButton(
               onPressed: () => context.go(customerLoginPath),
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white38),
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                side: const BorderSide(color: Colors.white),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 16,
@@ -1828,7 +1829,13 @@ class _HeroCopy extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                 ),
               ),
-              child: Text(customerLoginLabel),
+              child: Text(
+                customerLoginLabel,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
             TextButton(
               onPressed: () => context.go(staffLoginPath),

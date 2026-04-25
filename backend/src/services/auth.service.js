@@ -401,62 +401,6 @@ async function loadVerifiedCustomerRegistration(
   return verification;
 }
 
-function resolveDemoPassword(
-  role,
-  email,
-) {
-  const normalizedEmail =
-    String(email || "").toLowerCase();
-
-  // WHY: Demo autofill passwords are a local/dev convenience and must not survive into production responses.
-  if (
-    process.env.NODE_ENV ===
-    "production"
-  ) {
-    return null;
-  }
-
-  if (
-    role === USER_ROLES.ADMIN &&
-    normalizedEmail ===
-      "admin@adams.local"
-  ) {
-    return (
-      process.env
-        .SEED_ADMIN_PASSWORD ||
-      null
-    );
-  }
-
-  if (
-    role === USER_ROLES.STAFF &&
-    /^(care|staff)\d+@adams\.local$/.test(
-      normalizedEmail,
-    )
-  ) {
-    return (
-      process.env
-        .SEED_STAFF_PASSWORD ||
-      null
-    );
-  }
-
-  if (
-    role === USER_ROLES.CUSTOMER &&
-    /^customer\d+@adams\.local$/.test(
-      normalizedEmail,
-    )
-  ) {
-    return (
-      process.env
-        .SEED_CUSTOMER_PASSWORD ||
-      null
-    );
-  }
-
-  return null;
-}
-
 async function registerCustomer(
   payload,
   meta,
